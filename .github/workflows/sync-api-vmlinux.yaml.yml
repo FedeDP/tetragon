@@ -1,63 +1,32 @@
 name: Sync api.h and vmlinux.h from latest kernel
 on:
   workflow_dispatch:
-    inputs:
-      linux-release:
-        description: 'Linux kernel release to run against'
-        required: false
-        type: string
   schedule:
     - cron: '0 2 * * 1' # each monday at 2:00
 
 jobs:
-  load-latest-kernel-release:
-    runs-on: 'ubuntu-24.04'
-    outputs:
-      release: ${{ steps.kernel.outputs.release }}
-    steps:
-      # inputs.linux-release takes precedence.
-      # If empty, we fetch latest tag on torvalds/linux repo.
-      # Skip RCs.
-      - name: Load latest linux tag
-        id: kernel
-        run: |
-          ktag=${{ inputs.linux-release }}
-          if [[ -z "${ktag}" ]]; then
-            ktag=$(curl  "https://api.github.com/repos/torvalds/linux/tags" | jq -r '.[0].name')
-            echo "using latest linux release: ${ktag}"
-          else
-            echo "enforcing requested linux release: ${ktag}"
-          fi
-          if [[ "${ktag}" == *-rc* ]]; then
-            echo "Skipping job execution for RC: ${ktag}."
-          else
-            echo "release=${ktag}" >> "$GITHUB_OUTPUT"
-          fi
-
   sync-api-vmlinux:
-    needs: load-latest-kernel-release
-    if: needs.load-latest-kernel-release.outputs.release != ''
     runs-on: ${{ (matrix.arch == 'arm64' && 'ubuntu-24.04-arm') || 'ubuntu-24.04' }}
     strategy:
       matrix:
         arch: [ x86, arm64 ]
         include:
           - arch: x86
-            deb_arch: amd64
+            tumbleweed_repo: 'https://download.opensuse.org/tumbleweed/repo/oss/x86_64/'
           - arch: arm64
-            deb_arch: arm64
+            tumbleweed_repo: 'https://download.opensuse.org/ports/aarch64/tumbleweed/repo/oss/aarch64/'
     steps:
       - name: Install bpftool
         uses: mtardy/setup-bpftool@9bc044304197616a6321d452e04cc059e006d8e2 # v1.0.4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download requested kernel image from ubuntu mainline ppa
+      - name: Download most recent kernel package from opensuse tumbleweed
         run: |
-          image=$(wget -qO- https://kernel.ubuntu.com/mainline/${{ needs.load-latest-kernel-release.outputs.release }}/${{ matrix.deb_arch }}/ | grep "linux-image-*" | awk '{split($0,file,"\""); print file[8]}' | head -n1)
-          wget -O image.deb https://kernel.ubuntu.com/mainline/${{ needs.load-latest-kernel-release.outputs.release }}/${{ matrix.deb_arch }}/$image
-          mkdir image
-          dpkg-deb -R image.deb image/
+          image=$(wget -qO- ${{ matrix.tumbleweed_repo }} | grep "kernel-default-base-*" | head -n1 | awk '{split($0,file,"\""); print file[4]}')
+          wget -O image.rpm ${{ matrix.tumbleweed_repo }}$image
+          mkdir image && cd image
+          rpm2cpio ../image.rpm | cpio -idmv
 
       - name: Download extract-kernel script from upstream linux repo
         run: |
@@ -66,7 +35,7 @@ jobs:
 
       - name: Extract vmlinuz
         run: |
-          ./extract-vmlinux image/boot/vmlinuz-* > decomp-vmlinuz
+          ./extract-vmlinux image/usr/lib/modules/*/vmlinux.xz > decomp-vmlinuz
 
       - name: Generate updated vmlinux_generated
         run: |
@@ -77,7 +46,7 @@ jobs:
         if: matrix.arch == 'x86'
         run: |
           wget -O out/bpf_helper_defs.h https://raw.githubusercontent.com/libbpf/libbpf/refs/heads/master/src/bpf_helper_defs.h
-          sed -i 's/const bpf_/const /g' bpf_helper_defs.h 
+          sed -i 's/const bpf_/const /g' out/bpf_helper_defs.h 
 
       - name: upload artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -87,8 +56,7 @@ jobs:
           if-no-files-found: error
 
   create-pr:
-    needs: [load-latest-kernel-release, sync-api-vmlinux]
-    if: needs.load-latest-kernel-release.outputs.release != ''
+    needs: [sync-api-vmlinux]
     permissions:
       contents: write
       pull-requests: write
