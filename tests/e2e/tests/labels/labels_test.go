@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cilium/tetragon/tests/e2e/metricschecker"
 	"sigs.k8s.io/e2e-framework/pkg/envconf"
 	"sigs.k8s.io/e2e-framework/pkg/features"
 	"sigs.k8s.io/e2e-framework/third_party/helm"
@@ -115,8 +116,13 @@ func TestLabelsDemoApp(t *testing.T) {
 	uninstall := features.New("Uninstall Demo App").
 		Assess("Uninstall", uninstallDemoApp()).Feature()
 
+	metricsChecker := metricschecker.NewMetricsChecker("labelsMetricsChecker").WithTimeLimit(5 * time.Minute)
+	metrics := features.New("Run Metrics Checks").
+		Assess("Run Metrics Checks", metricsChecker.Greater("events_total", 0)).Feature()
+
 	// Spawn workload and run checker
 	runner.TestInParallel(t, runEventChecker, runWorkload)
+	runner.Test(t, metrics)
 	runner.Test(t, uninstall)
 }
 

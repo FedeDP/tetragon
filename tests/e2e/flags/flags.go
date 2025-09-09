@@ -17,7 +17,7 @@ var Opts = Flags{
 		DaemonSetName:    "tetragon",
 		HelmChart:        "cilium/tetragon",
 		HelmRepoUrl:      "https://helm.cilium.io",
-		HelmChartVersion: "9999.9999.9999-dev",
+		HelmChartVersion: "1.5.0",
 		Namespace:        "kube-system",
 		ValuesFile:       "",
 		BTF:              "",
