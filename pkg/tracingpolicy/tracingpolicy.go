@@ -4,6 +4,7 @@
 package tracingpolicy
 
 import (
+	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
 )
 
@@ -18,7 +19,10 @@ type TracingPolicy interface {
 	TpSpec() *v1alpha1.TracingPolicySpec
 	// TpInfo returns a description of the policy
 	TpInfo() string
+	// TpNamespace returns the namespace of the policy
 	TpNamespace() string
+	// TpDomain returns the domain for the policy
+	TpDomain() tetragon.TracingPolicyDomain
 }
 
 type PolicyInfo struct {

@@ -6,6 +6,7 @@
 package tracingpolicy
 
 import (
+	"github.com/cilium/tetragon/api/v1/tetragon"
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
 )
 
@@ -44,4 +45,8 @@ func (gtp *GenericTracingPolicy) TpInfo() string {
 
 func (gtp *GenericTracingPolicy) TpSpec() *v1alpha1.TracingPolicySpec {
 	return &gtp.Spec
+}
+
+func (gtp *GenericTracingPolicy) TpDomain() tetragon.TracingPolicyDomain {
+	return tetragon.TracingPolicyDomain_TP_DOMAIN_STATIC
 }

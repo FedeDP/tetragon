@@ -8,6 +8,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/cilium/tetragon/api/v1/tetragon"
+
 	ciliumio "github.com/cilium/tetragon/pkg/k8s/apis/cilium.io"
 	slimv1 "github.com/cilium/tetragon/pkg/k8s/slim/k8s/apis/meta/v1"
 )
@@ -64,6 +66,10 @@ func (tp *TracingPolicyNamespaced) TpSpec() *TracingPolicySpec {
 
 func (tp *TracingPolicyNamespaced) TpInfo() string {
 	return fmt.Sprintf("%s (object:%d/%s) (type:%s/%s)", tp.ObjectMeta.Name, tp.ObjectMeta.Generation, tp.ObjectMeta.UID, tp.TypeMeta.Kind, tp.TypeMeta.APIVersion)
+}
+
+func (tp *TracingPolicyNamespaced) TpDomain() tetragon.TracingPolicyDomain {
+	return tetragon.TracingPolicyDomain_TP_DOMAIN_K8S
 }
 
 func (tp *TracingPolicyNamespaced) TpName() string {
@@ -146,6 +152,10 @@ func (tp *TracingPolicy) TpInfo() string {
 
 func (tp *TracingPolicy) TpNamespace() string {
 	return ""
+}
+
+func (tp *TracingPolicy) TpDomain() tetragon.TracingPolicyDomain {
+	return tetragon.TracingPolicyDomain_TP_DOMAIN_K8S
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

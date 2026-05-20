@@ -55,13 +55,21 @@ func (s TracingPolicyState) ToTetragonState() tetragon.TracingPolicyState {
 // this enables policies with the same name for different namespaces
 type collectionKey struct {
 	name, namespace string
+	domain          tetragon.TracingPolicyDomain
 }
 
 func (ck *collectionKey) String() string {
 	if ck.namespace != "" {
-		return fmt.Sprintf("%s/%s", ck.namespace, ck.name)
+		return fmt.Sprintf("%s:%s/%s", ck.domain, ck.namespace, ck.name)
 	}
-	return ck.name
+	return fmt.Sprintf("%s:%s", ck.domain, ck.name)
+}
+
+func newCollectionKey(name, namespace string, domain tetragon.TracingPolicyDomain) (collectionKey, error) {
+	if domain == sensorsDomain {
+		return collectionKey{}, fmt.Errorf("domain %s is reserved for internal use", domain)
+	}
+	return collectionKey{name, namespace, domain}, nil
 }
 
 // Exposed via ListCollections()

@@ -8,6 +8,8 @@ package tracingpolicy
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/cilium/tetragon/api/v1/tetragon"
+
 	"github.com/cilium/tetragon/pkg/k8s/apis/cilium.io/v1alpha1"
 )
 
@@ -38,6 +40,10 @@ func (gtp *GenericTracingPolicy) TpInfo() string {
 	return gtp.Metadata.Name
 }
 
+func (gtp *GenericTracingPolicy) TpDomain() tetragon.TracingPolicyDomain {
+	return tetragon.TracingPolicyDomain_TP_DOMAIN_STATIC
+}
+
 func (gtp *GenericTracingPolicy) GetObjectMetaStruct() *metav1.ObjectMeta {
 	return &gtp.Metadata
 }
@@ -64,6 +70,10 @@ func (gtp *GenericTracingPolicyNamespaced) TpSpec() *v1alpha1.TracingPolicySpec 
 
 func (gtp *GenericTracingPolicyNamespaced) TpInfo() string {
 	return gtp.Metadata.Name
+}
+
+func (gtp *GenericTracingPolicyNamespaced) TpDomain() tetragon.TracingPolicyDomain {
+	return tetragon.TracingPolicyDomain_TP_DOMAIN_STATIC
 }
 
 func (gtp *GenericTracingPolicyNamespaced) GetObjectMetaStruct() *metav1.ObjectMeta {
