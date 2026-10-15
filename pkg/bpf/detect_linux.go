@@ -732,6 +732,16 @@ func HasCopyFromUserStr() bool {
 	return HasKfunc("bpf_copy_from_user_str")
 }
 
+// HasTaskIterAllProcs returns true if the kernel supports walking all the
+// processes in the system with the open-coded task iterator, i.e.
+// bpf_iter_task_new() with BPF_TASK_ITER_ALL_PROCS. Unlike the task iterator
+// program type, it is not bound to the caller's pid namespace. The other
+// kfuncs are the ones the startup process scan uses along with it.
+func HasTaskIterAllProcs() bool {
+	return HasKfunc("bpf_iter_task_new") && HasKfunc("bpf_iter_num_new") &&
+		HasKfunc("bpf_rcu_read_lock") && HasKfunc("bpf_task_from_pid")
+}
+
 func detectMixBpfAndTailCalls() bool {
 	// create a tail call map
 	tcMap, err := ebpf.NewMap(&ebpf.MapSpec{
@@ -861,4 +871,5 @@ var FeatureProbes = []FeatureProbe{
 	{GetFuncRet, HasGetFuncRetHelper},
 	{SubStringKfuncProbe, HasSubStringKfunc},
 	{CopyFromUserStr, HasCopyFromUserStr},
+	{TaskIterAllProcs, HasTaskIterAllProcs},
 }
