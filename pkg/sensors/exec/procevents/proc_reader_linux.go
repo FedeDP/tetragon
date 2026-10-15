@@ -89,7 +89,7 @@ func updateExecveMapStats(procs int64) {
 	}
 }
 
-func writeExecveMap(procs []procs) map[uint32]struct{} {
+func openExecveMap() *ebpf.Map {
 	mapDir := bpf.MapPrefixPath()
 
 	execveMap := base.GetExecveMap()
@@ -104,19 +104,14 @@ func writeExecveMap(procs []procs) map[uint32]struct{} {
 			panic(err)
 		}
 	}
-	inInitTree := make(map[uint32]struct{})
-	for _, p := range procs {
-		k, v := procToKeyValue(p, inInitTree)
+	return m
+}
 
-		err := m.Put(k, v)
-		if err != nil {
-			logger.GetLogger().Warn("failed to put value in execve_map", "value", v, logfields.Error, err)
-		}
-	}
-	// In order for kprobe events from kernel ctx to not abort we need the
-	// execve lookup to map to a valid entry. So to simplify the kernel side
-	// and avoid having to add another branch of logic there to handle pid==0
-	// case we simply add it here.
+// In order for kprobe events from kernel ctx to not abort we need the
+// execve lookup to map to a valid entry. So to simplify the kernel side
+// and avoid having to add another branch of logic there to handle pid==0
+// case we simply add it here.
+func writeExecveMapKernel(m *ebpf.Map) {
 	m.Put(&execvemap.ExecveKey{Pid: kernelPid}, &execvemap.ExecveValue{
 		Parent: processapi.MsgExecveKey{
 			Pid:   kernelPid,
@@ -126,6 +121,20 @@ func writeExecveMap(procs []procs) map[uint32]struct{} {
 			Ktime: 1,
 		},
 	})
+}
+
+func writeExecveMap(procs []procs) map[uint32]struct{} {
+	m := openExecveMap()
+	inInitTree := make(map[uint32]struct{})
+	for _, p := range procs {
+		k, v := procToKeyValue(p, inInitTree)
+
+		err := m.Put(k, v)
+		if err != nil {
+			logger.GetLogger().Warn("failed to put value in execve_map", "value", v, logfields.Error, err)
+		}
+	}
+	writeExecveMapKernel(m)
 	m.Close()
 
 	updateExecveMapStats(int64(len(procs)))
