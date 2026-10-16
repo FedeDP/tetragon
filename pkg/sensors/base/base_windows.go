@@ -38,3 +38,9 @@ func GetDefaultMaps() []*program.Map {
 	return maps
 
 }
+
+// BPFProcScanEnabled returns false, the BPF process scan is only supported on
+// Linux.
+func ProcScanEnabled() bool {
+	return false
+}
