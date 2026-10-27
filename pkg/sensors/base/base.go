@@ -57,6 +57,16 @@ var (
 		"socket",
 	).SetPolicy(sensors.BaseSensorName)
 
+	// ExecveMapAccess is used by userspace to access the execve_map
+	// entries when it's a task storage map, see execvemap.Lookup.
+	ExecveMapAccess = program.Builder(
+		"bpf_execve_map_access_v61.o",
+		"syscall",
+		"syscall",
+		"execve_map_access",
+		"socket",
+	).SetPolicy(sensors.BaseSensorName)
+
 	ExecveBprmCommit = program.Builder(
 		config.ExecveBprmCommitObj(),
 		"security_bprm_committing_creds",
