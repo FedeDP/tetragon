@@ -132,7 +132,7 @@ func scanRunningProcs(procPath string) ([]procs, map[uint32]struct{}, bool, erro
 
 		// The process exited, or exec-ed and was already reported by
 		// the exec hook.
-		if err := m.Lookup(&execvemap.ExecveKey{Pid: e.Pid}, &v); err != nil || v.Process.Ktime != e.Ktime {
+		if err := execvemap.Lookup(m, e.Pid, &v); err != nil || v.Process.Ktime != e.Ktime {
 			continue
 		}
 		if v.Flags&api.EventInInitTree != 0 {
@@ -206,7 +206,7 @@ func procFromScan(procPath string, m *ebpf.Map, e *ProcScanEntry, v *execvemap.E
 		}
 		if v.Parent.Pid != 0 {
 			var pv execvemap.ExecveValue
-			if err := m.Lookup(&execvemap.ExecveKey{Pid: v.Parent.Pid}, &pv); err == nil {
+			if err := execvemap.Lookup(m, v.Parent.Pid, &pv); err == nil {
 				pnspid = pv.Nspid
 				if pnspid == 0 {
 					pnspid = v.Parent.Pid

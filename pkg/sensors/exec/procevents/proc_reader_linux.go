@@ -112,7 +112,7 @@ func openExecveMap() *ebpf.Map {
 // and avoid having to add another branch of logic there to handle pid==0
 // case we simply add it here.
 func writeExecveMapKernel(m *ebpf.Map) {
-	m.Put(&execvemap.ExecveKey{Pid: kernelPid}, &execvemap.ExecveValue{
+	execvemap.Put(m, kernelPid, &execvemap.ExecveValue{
 		Parent: processapi.MsgExecveKey{
 			Pid:   kernelPid,
 			Ktime: 1},
@@ -129,7 +129,7 @@ func writeExecveMap(procs []procs) map[uint32]struct{} {
 	for _, p := range procs {
 		k, v := procToKeyValue(p, inInitTree)
 
-		err := m.Put(k, v)
+		err := execvemap.Put(m, k.Pid, v)
 		if err != nil {
 			logger.GetLogger().Warn("failed to put value in execve_map", "value", v, logfields.Error, err)
 		}

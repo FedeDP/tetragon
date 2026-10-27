@@ -634,6 +634,12 @@ func (s *bugtoolInfo) addExecveMap() error {
 	}
 	defer m.Close()
 
+	// task storage maps can't be iterated
+	if m.Type() == ebpf.TaskStorage {
+		s.multiLog.Info("execve map is a task storage map, skipping dump")
+		return nil
+	}
+
 	iter := m.Iterate()
 
 	var key execvemap.ExecveKey
