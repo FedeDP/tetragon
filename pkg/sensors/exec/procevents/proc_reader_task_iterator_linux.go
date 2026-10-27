@@ -30,6 +30,9 @@ const (
 	// ProcScanNotInMap is set if the process could not be added to
 	// execve_map, i.e. the map is full.
 	ProcScanNotInMap = 0x4
+	// ProcScanStale is set if the process exited, or exec-ed and was
+	// reported by the exec hook, after the scan.
+	ProcScanStale = 0x8
 
 	procScanCwdMax = 4096
 )
@@ -46,7 +49,9 @@ type ProcScanEntry struct {
 	Auid   uint32
 	CwdLen uint32
 	Kube   processapi.MsgK8s
-	Cwd    [procScanCwdMax]byte
+	// Value is the execve_map entry of the process
+	Value execvemap.ExecveValue
+	Cwd   [procScanCwdMax]byte
 }
 
 // RunProcScan returns the processes found by the proc_scan program, which
@@ -149,12 +154,30 @@ func (r *BPFProcReader) scan(procPath string) ([]procs, map[uint32]struct{}, err
 	m := openExecveMap()
 	defer m.Close()
 
+	// The records carry the execve_map entries, look up the parents among
+	// them before going to execve_map.
+	scanned := make(map[uint32]*execvemap.ExecveValue, len(entries))
+	for i := range entries {
+		if entries[i].Flags&(ProcScanNotInMap|ProcScanStale) == 0 {
+			scanned[entries[i].Pid] = &entries[i].Value
+		}
+	}
+	parentNspid := func(pid uint32) (uint32, bool) {
+		if v, ok := scanned[pid]; ok {
+			return v.Nspid, true
+		}
+		var v execvemap.ExecveValue
+		if err := execvemap.Lookup(m, pid, &v); err != nil {
+			return 0, false
+		}
+		return v.Nspid, true
+	}
+
 	processes := make([]procs, 0, len(entries))
 	inInitTree := make(map[uint32]struct{})
 	var w readProcWarnings
 	for i := range entries {
 		e := &entries[i]
-		var v execvemap.ExecveValue
 
 		if e.Flags&ProcScanNotInMap != 0 {
 			p, ok := readProc(procPath, strconv.FormatUint(uint64(e.Pid), 10), &w)
@@ -172,13 +195,13 @@ func (r *BPFProcReader) scan(procPath string) ([]procs, map[uint32]struct{}, err
 
 		// The process exited, or exec-ed and was already reported by
 		// the exec hook.
-		if err := execvemap.Lookup(m, e.Pid, &v); err != nil || v.Process.Ktime != e.Ktime {
+		if e.Flags&ProcScanStale != 0 {
 			continue
 		}
-		if v.Flags&api.EventInInitTree != 0 {
+		if e.Value.Flags&api.EventInInitTree != 0 {
 			inInitTree[e.Pid] = struct{}{}
 		}
-		processes = append(processes, procFromScan(procPath, m, e, &v))
+		processes = append(processes, procFromScan(procPath, e, parentNspid))
 	}
 	writeExecveMapKernel(m)
 
@@ -191,7 +214,10 @@ func (r *BPFProcReader) scan(procPath string) ([]procs, map[uint32]struct{}, err
 // that the startup event matches the one of the procfs scan. The binary path
 // and the arguments in execve_map are truncated, so the full ones are read
 // from procfs.
-func procFromScan(procPath string, m *ebpf.Map, e *ProcScanEntry, v *execvemap.ExecveValue) procs {
+//
+// parentNspid returns the nspid in the execve_map entry of the parent.
+func procFromScan(procPath string, e *ProcScanEntry, parentNspid func(pid uint32) (uint32, bool)) procs {
+	v := &e.Value
 	pidstr := strconv.FormatUint(uint64(e.Pid), 10)
 	kernelThread := e.Flags&ProcScanKthread != 0
 
@@ -245,9 +271,8 @@ func procFromScan(procPath string, m *ebpf.Map, e *ProcScanEntry, v *execvemap.E
 			nspid = e.Pid
 		}
 		if v.Parent.Pid != 0 {
-			var pv execvemap.ExecveValue
-			if err := execvemap.Lookup(m, v.Parent.Pid, &pv); err == nil {
-				pnspid = pv.Nspid
+			if n, ok := parentNspid(v.Parent.Pid); ok {
+				pnspid = n
 				if pnspid == 0 {
 					pnspid = v.Parent.Pid
 				}
