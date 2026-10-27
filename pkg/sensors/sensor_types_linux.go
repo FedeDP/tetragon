@@ -17,6 +17,7 @@ var (
 		"tracepoint":     program.LoadTracepointProgram,
 		"raw_tracepoint": program.LoadRawTracepointProgram,
 		"raw_tp":         program.LoadRawTracepointProgram,
+		"tp_btf":         program.LoadTracingProgram,
 		"cgrp_socket":    cgroup.LoadCgroupProgram,
 		"kprobe":         program.LoadKprobeProgram,
 		"lsm":            program.LoadLSMProgram,
