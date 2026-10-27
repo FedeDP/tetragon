@@ -93,6 +93,7 @@ func TestObserverSingle(t *testing.T) {
 	t.Run("TestExit", testExit)
 	t.Run("TestExitLeader", testExitLeader)
 	t.Run("TestExitZombie", testExitZombie)
+	t.Run("TestExecThread", testExecThread)
 	t.Run("TestExitCode", testExitCode)
 	t.Run("TestExitSignal", testExitSignal)
 	t.Run("TestFork", testFork)
