@@ -106,7 +106,8 @@ func testExitLeader(t *testing.T) {
 //   - have the group leader return
 //   - once this happens, the thread (which continues to run) will exec a /bin/echo command
 //
-// In our test we check that the parent of the /bin/echo command is the exit-tester program.
+// In our test we check that the parent of the /bin/echo command is the exit-tester program,
+// and that its exit is reported.
 func testExitZombie(t *testing.T) {
 	testBin := testutils.RepoRootPath("contrib/tester-progs/exit-tester")
 	testCmd := exec.Command(testBin)
@@ -132,9 +133,34 @@ func testExitZombie(t *testing.T) {
 	checker := ec.NewUnorderedEventChecker(
 		ec.NewProcessExecChecker("exitTester").WithProcess(exitTesterCheck),
 		ec.NewProcessExecChecker("echo").WithProcess(echoCheck).WithParent(exitTesterCheck),
+		ec.NewProcessExitChecker("echoExit").WithProcess(echoCheck),
 	)
 
 	err = jsonchecker.JsonTestCheck(t, checker)
+	require.NoError(t, err)
+}
+
+// TestExecThread tests a thread other than the group leader calling execve while the leader is
+// still running. See: tester-progs/exec-thread.c for the program we use to test this.
+//
+// The exec takes over the thread group leader, and the process has to keep its execve_map entry:
+// the parent of the exec is the previous exec found in the entry (the exec-thread program), and
+// the exit is reported only if the entry is there.
+func testExecThread(t *testing.T) {
+	testBin := testutils.RepoRootPath("contrib/tester-progs/exec-thread")
+	if err := exec.Command(testBin).Run(); err != nil {
+		t.Fatalf("command failed with %s", err)
+	}
+
+	execThreadCheck := ec.NewProcessChecker().WithBinary(sm.Suffix("tester-progs/exec-thread"))
+	shCheck := ec.NewProcessChecker().WithBinary(sm.Full("/bin/sh")).WithArguments(sm.Contains("exec from a thread"))
+	checker := ec.NewUnorderedEventChecker(
+		ec.NewProcessExecChecker("execThread").WithProcess(execThreadCheck),
+		ec.NewProcessExecChecker("sh").WithProcess(shCheck).WithParent(execThreadCheck),
+		ec.NewProcessExitChecker("shExit").WithProcess(shCheck),
+	)
+
+	err := jsonchecker.JsonTestCheck(t, checker)
 	require.NoError(t, err)
 }
 

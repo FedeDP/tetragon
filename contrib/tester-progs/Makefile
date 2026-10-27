@@ -11,6 +11,7 @@ PROGS = sigkill-tester \
 	nop \
 	exit-leader \
 	exit-tester \
+	exec-thread \
 	exit-code \
 	uprobe-test-1 \
 	uprobe-test-2 \
@@ -77,6 +78,9 @@ change-capabilities: change-capabilities.c
 	$(GCC) -Wall $< -o $@ -lcap
 
 exit-tester: exit-tester.c
+	$(GCC) -Wall $< -o $@ -lpthread
+
+exec-thread: exec-thread.c
 	$(GCC) -Wall $< -o $@ -lpthread
 
 sigkill-unprivileged-user-ns-tester: sigkill-unprivileged-user-ns-tester.c
