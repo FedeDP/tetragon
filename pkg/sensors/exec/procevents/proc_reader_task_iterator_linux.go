@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"github.com/cilium/ebpf"
@@ -66,23 +67,48 @@ func procScan() ([]ProcScanEntry, error) {
 	// The program and its map are only needed once.
 	defer unloadProcScan()
 
+	type procKey struct {
+		pid   uint32
+		ktime uint64
+	}
+
 	m := base.BpfProcScanMap.MapHandle
-	cnt, err := base.BpfProcScan.Prog.Run(&ebpf.RunOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("running proc_scan program failed: %w", err)
-	}
-
-	entries := make([]ProcScanEntry, 0, cnt)
-	for i := range cnt {
-		var e ProcScanEntry
-
-		if err := m.Lookup(i, &e); err != nil {
-			logger.GetLogger().Warn("Failed to read proc_scan entry", "index", i, logfields.Error, err)
-			continue
+	var entries []ProcScanEntry
+	seen := make(map[procKey]struct{})
+	for {
+		cnt, err := base.BpfProcScan.Prog.Run(&ebpf.RunOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("running proc_scan program failed: %w", err)
 		}
-		entries = append(entries, e)
+
+		entries = slices.Grow(entries, int(cnt))
+		for i := range cnt {
+			var e ProcScanEntry
+
+			if err := m.Lookup(i, &e); err != nil {
+				logger.GetLogger().Warn("Failed to read proc_scan entry", "index", i, logfields.Error, err)
+				continue
+			}
+			// The processes not added to execve_map are recorded
+			// again by the next run.
+			k := procKey{pid: e.Pid, ktime: e.Ktime}
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			entries = append(entries, e)
+		}
+
+		// With a task storage execve_map, the processes that don't fit
+		// in tg_proc_scan_map are left for the next run, which skips
+		// the ones recorded so far. That's not the case with the hash
+		// execve_map, where the processes that don't fit in it would
+		// be recorded again by every run.
+		if !base.ExecveMapTaskStorage() || cnt < m.MaxEntries() {
+			return entries, nil
+		}
+		logger.GetLogger().Info("BPF proc scan map is full, scanning again", "entries", len(entries))
 	}
-	return entries, nil
 }
 
 // unloadProcScan releases the proc_scan program and map. The base sensor

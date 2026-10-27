@@ -44,7 +44,7 @@ func procScanKtime(t *testing.T, pid uint32) uint64 {
 
 func procScanLookup(t *testing.T, m *ebpf.Map, pid uint32) execvemap.ExecveValue {
 	var v execvemap.ExecveValue
-	require.NoError(t, m.Lookup(&execvemap.ExecveKey{Pid: pid}, &v), "pid %d not in execve_map", pid)
+	require.NoError(t, execvemap.Lookup(m, pid, &v), "pid %d not in execve_map", pid)
 	return v
 }
 

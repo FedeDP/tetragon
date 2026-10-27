@@ -57,6 +57,17 @@ var (
 		"socket",
 	).SetPolicy(sensors.BaseSensorName)
 
+	// ExecveBeginNewExec keeps the task storage execve_map entry of a
+	// process across de_thread(). It's only loaded when
+	// ExecveMapTaskStorage() is true.
+	ExecveBeginNewExec = program.Builder(
+		"bpf_execve_begin_v61.o",
+		"begin_new_exec",
+		"kprobe/begin_new_exec",
+		"tg_kp_begin_new_exec",
+		"kprobe",
+	).SetPolicy(sensors.BaseSensorName)
+
 	// ExecveMapAccess is used by userspace to access the execve_map
 	// entries when it's a task storage map, see execvemap.Lookup.
 	ExecveMapAccess = program.Builder(
@@ -95,7 +106,8 @@ var (
 	TCPMonMap     = program.MapBuilder("tcpmon_map", Execve)
 	RingBufEvents = program.MapBuilder(RingBufMapName, Execve, Exit, Fork)
 	/* Networking and Process Monitoring maps */
-	ExecveMap           = program.MapBuilder("execve_map", Execve, Exit, Fork, ExecveBprmCommit, ExecveMapUpdate, BpfProcScan)
+	ExecveMap           = program.MapBuilder("execve_map", Execve, Exit, Fork, ExecveBprmCommit, ExecveMapUpdate, BpfProcScan, ExecveBeginNewExec, ExecveMapAccess)
+	ExecveKernelMap     = program.MapBuilder("execve_map_kernel", Execve, ExecveMapAccess)
 	ExecveTailCallsMap  = program.MapBuilderProgram("execve_calls", Execve)
 	ExecveMapUpdateData = program.MapBuilder("execve_map_update_data", ExecveMapUpdate)
 	BpfProcScanMap      = program.MapBuilder("tg_proc_scan_map", BpfProcScan)
@@ -173,19 +185,23 @@ func setupSensor() {
 	logger.GetLogger().Info("Exit probe on " + Exit.Attach)
 
 	entries := GetExecveEntries(option.Config.ExecveMapEntries, option.Config.ExecveMapSize)
-	ExecveMap.SetMaxEntries(entries)
-	if option.Config.ExecveMapNoPrealloc {
-		ExecveMap.SetFlag(bpf.BPF_F_NO_PREALLOC)
+
+	// The BPF proc scan is only used along with the task storage execve_map,
+	// see ExecveMapTaskStorage().
+	if setupExecveMapTaskStorage() {
+		// The scan records every running process, so don't go below the
+		// default execve_map size. The map is not preallocated, so it only
+		// uses memory for the running processes.
+		BpfProcScanMap.SetMaxEntries(max(entries, execveMapMaxEntries))
+		logger.GetLogger().Info("execve_map uses task storage, its configured entries only size the startup scan")
+	} else {
+		ExecveMap.SetMaxEntries(entries)
+		if option.Config.ExecveMapNoPrealloc {
+			ExecveMap.SetFlag(bpf.BPF_F_NO_PREALLOC)
+		}
+		logger.GetLogger().Info(fmt.Sprintf("Set execve_map entries %d", entries),
+			"size", strutils.SizeWithSuffix(entries*int(unsafe.Sizeof(execvemap.ExecveValue{}))))
 	}
-
-	// The scan also records the processes that don't fit in execve_map, so
-	// don't go below the default execve_map size. The map is not
-	// preallocated, so it only uses memory for the running processes.
-	BpfProcScanMap.SetMaxEntries(max(entries, execveMapMaxEntries))
-
-	logger.GetLogger().Info(fmt.Sprintf("Set execve_map entries %d", entries),
-		"size", strutils.SizeWithSuffix(entries*int(unsafe.Sizeof(execvemap.ExecveValue{}))),
-		"no-prealloc", option.Config.ExecveMapNoPrealloc)
 
 	if !config.EnableV511Progs() && option.Config.EnableProcessEnvironmentVariables {
 		Execve.RewriteConstants["ENV_VARS_ENABLED"] = uint8(1)
