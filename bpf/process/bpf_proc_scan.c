@@ -36,7 +36,11 @@ char _license[] __attribute__((section("license"), used)) = "Dual BSD/GPL";
  *    iterator loop rather than from proc_scan_task(), see proc_scan_add().
  *  - the second pass reads the arguments of the recorded processes. Reading
  *    another process memory with copy_from_user_task() can sleep, which is not
- *    allowed under RCU, hence the separate pass.
+ *    allowed under RCU, hence the separate pass. It also flags the processes
+ *    that exited or exec-ed in the meantime with PROC_SCAN_STALE.
+ *
+ * Each record carries the execve_map entry of the process, so userspace does
+ * not need to look up execve_map.
  *
  * The program returns the number of processes recorded in tg_proc_scan_map.
  */
@@ -57,6 +61,8 @@ char _license[] __attribute__((section("license"), used)) = "Dual BSD/GPL";
 #define PROC_SCAN_CWD_ERROR 0x2
 /* the process could not be added to execve_map, i.e. the map is full */
 #define PROC_SCAN_NOT_IN_MAP 0x4
+/* the process exited, or exec-ed and was reported by the exec hook */
+#define PROC_SCAN_STALE 0x8
 
 struct proc_scan_entry {
 	__u32 pid;
@@ -71,6 +77,8 @@ struct proc_scan_entry {
 	__u32 cwd_len;
 	/* cgroup id and name, used to find the container id */
 	struct msg_k8s kube;
+	/* the execve_map entry, with the arguments set by the second pass */
+	struct execve_map_value value;
 	char cwd[PROC_SCAN_CWD_MAX];
 }; // All fields aligned so no 'packed' attribute.
 
@@ -171,6 +179,7 @@ proc_scan_record(struct task_struct *task, struct proc_scan_heap *heap, __u32 fl
 	entry->pid = value->key.pid;
 	entry->flags = flags;
 	entry->ktime = value->key.ktime;
+	__bpf_memcpy_builtin(&entry->value, value, sizeof(entry->value));
 	entry->uids[0] = BPF_CORE_READ(cred, uid.val);
 	entry->uids[1] = BPF_CORE_READ(cred, euid.val);
 	entry->uids[2] = BPF_CORE_READ(cred, suid.val);
@@ -307,36 +316,32 @@ FUNC_INLINE void proc_scan_add(struct task_struct *task, struct proc_scan_heap *
 }
 
 /* Read the process arguments, excluding argv[0], same as read_task_args_source()
- * and copy_args() do for the current task.
+ * and copy_args() do for the current task. heap->args.len is zero on failure.
  */
 FUNC_INLINE void
-proc_scan_args(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
+proc_scan_read_args(struct task_struct *task, struct proc_scan_heap *heap)
 {
-	struct execve_map_value *curr;
-	struct task_struct *task;
 	unsigned long start, end;
 	struct mm_struct *mm;
 	__u64 len;
 	__u32 off = 0;
 	int i;
 
-	task = bpf_task_from_pid(entry->pid);
-	if (!task)
-		return;
+	heap->args.len = 0;
 
 	mm = BPF_CORE_READ(task, mm);
 	if (!mm)
-		goto out;
+		return;
 	start = BPF_CORE_READ(mm, arg_start);
 	end = BPF_CORE_READ(mm, arg_end);
 	if (!start || end <= start)
-		goto out;
+		return;
 
 	len = end - start;
 	if (len > PROC_SCAN_ARGV0_MAX)
 		len = PROC_SCAN_ARGV0_MAX;
 	if (copy_from_user_task(heap->argv0, len, (void *)start, task, 0))
-		goto out;
+		return;
 
 	bpf_for(i, 0, len)
 	{
@@ -346,14 +351,34 @@ proc_scan_args(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
 		}
 	}
 	if (!off)
-		goto out;
+		return;
 
-	heap->args.len = 0;
 	len = end - start - off;
 	if (len > sizeof(heap->args.buf))
 		len = sizeof(heap->args.buf);
 	if (len && !copy_from_user_task(heap->args.buf, len, (void *)start + off, task, 0))
 		heap->args.len = len;
+}
+
+/* Second pass over a recorded process: reads its arguments and checks that its
+ * execve_map entry is still the scanned one.
+ */
+FUNC_INLINE void
+proc_scan_finish(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
+{
+	struct execve_map_value *curr;
+	struct task_struct *task;
+
+	task = bpf_task_from_pid(entry->pid);
+	if (!task) {
+		entry->flags |= PROC_SCAN_STALE;
+		return;
+	}
+
+	/* kernel threads have no arguments */
+	heap->args.len = 0;
+	if (!(entry->flags & PROC_SCAN_KTHREAD))
+		proc_scan_read_args(task, heap);
 
 	/* The copies above can sleep, look up the entry only now so that it's
 	 * not freed and reused under us, and check it is still the process we
@@ -363,9 +388,13 @@ proc_scan_args(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
 		curr = task_storage_get(&execve_map, task, 0, 0);
 	else
 		curr = execve_map_get_noinit(entry->pid);
-	if (curr && curr->key.ktime == entry->ktime)
+	if (!curr || curr->key.ktime != entry->ktime) {
+		entry->flags |= PROC_SCAN_STALE;
+	} else if (heap->args.len) {
 		__bpf_memcpy_builtin(&curr->args, &heap->args, sizeof(curr->args));
-out:
+		__bpf_memcpy_builtin(&entry->value.args, &heap->args, sizeof(entry->value.args));
+	}
+
 	bpf_task_release(task);
 }
 
@@ -397,12 +426,10 @@ int proc_scan(void *ctx)
 		entry = map_lookup_elem(&tg_proc_scan_map, &i);
 		if (!entry)
 			break;
-		/* kernel threads have no arguments, and the processes not in
-		 * execve_map have no entry to store them
-		 */
-		if (entry->flags & (PROC_SCAN_KTHREAD | PROC_SCAN_NOT_IN_MAP))
+		/* the processes not in execve_map have no entry to check */
+		if (entry->flags & PROC_SCAN_NOT_IN_MAP)
 			continue;
-		proc_scan_args(entry, heap);
+		proc_scan_finish(entry, heap);
 	}
 	return cnt;
 }
