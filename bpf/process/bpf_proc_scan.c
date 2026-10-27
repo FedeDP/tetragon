@@ -32,6 +32,8 @@ char _license[] __attribute__((section("license"), used)) = "Dual BSD/GPL";
  *    Processes that could not be added to execve_map (i.e. the map is full)
  *    are recorded too, flagged with PROC_SCAN_NOT_IN_MAP, so that userspace
  *    still reports them as the procfs scan does.
+ *    When execve_map is a task storage map, the entries are created from the
+ *    iterator loop rather than from proc_scan_task(), see proc_scan_add().
  *  - the second pass reads the arguments of the recorded processes. Reading
  *    another process memory with copy_from_user_task() can sleep, which is not
  *    allowed under RCU, hence the separate pass.
@@ -90,7 +92,8 @@ struct proc_scan_heap {
 	 * known value and the task iterator loop states can converge.
 	 */
 	__u32 cnt;
-	__u32 pad;
+	/* PROC_SCAN_* flags of the process being added, see proc_scan_add() */
+	__u32 flags;
 	struct execve_map_value value;
 	struct proc_scan_entry entry;
 	struct heap_exe exe;
@@ -185,6 +188,11 @@ proc_scan_record(struct task_struct *task, struct proc_scan_heap *heap, __u32 fl
 		heap->cnt = idx + 1;
 }
 
+/* proc_scan_task() return value when the process entry must be added to the
+ * task storage execve_map by proc_scan_add().
+ */
+#define PROC_SCAN_ADD 1
+
 /* Global function, so the verifier checks it once rather than on every
  * iteration of the task iterator loop, where the states of this (large) body
  * would not converge and the program would hit the complexity limit.
@@ -201,6 +209,9 @@ proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *he
 	pid = BPF_CORE_READ(task, tgid);
 	/* idle task, the kernel entry is added by userspace */
 	if (!pid)
+		return 0;
+	/* the exec/fork hooks already track this process */
+	if (EXECVE_MAP_TASK_STORAGE && task_storage_get(&execve_map, task, 0, 0))
 		return 0;
 
 	__bpf_memset_builtin(value, 0, sizeof(*value));
@@ -228,6 +239,11 @@ proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *he
 	}
 	copy_exe_to_bin(&heap->exe, &value->bin);
 
+	if (EXECVE_MAP_TASK_STORAGE) {
+		heap->flags = flags;
+		return PROC_SCAN_ADD;
+	}
+
 	/* Processes are walked in fork order, so the parent was already added
 	 * unless the process got reparented.
 	 */
@@ -247,6 +263,47 @@ proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *he
 
 	proc_scan_record(task, heap, flags);
 	return 0;
+}
+
+/* Global function for the same reason as proc_scan_task(). */
+__attribute__((noinline)) int
+proc_scan_record_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *heap __arg_nonnull)
+{
+	proc_scan_record(task, heap, heap->flags);
+	return 0;
+}
+
+/* Adds the entry filled by proc_scan_task() to the task storage execve_map.
+ *
+ * It runs from the iterator loop, which holds the RCU read lock: the verifier
+ * only lets us walk task->real_parent there and makes the entry allocation
+ * atomic, as needed under RCU. The global functions are verified on their own,
+ * outside the lock.
+ */
+FUNC_INLINE void proc_scan_add(struct task_struct *task, struct proc_scan_heap *heap)
+{
+	struct execve_map_value *value = &heap->value;
+	struct execve_map_value *curr;
+
+	/* Processes are walked in fork order, so the parent was already added
+	 * unless the process got reparented.
+	 */
+	set_in_init_tree(value, execve_map_task_get(*_(&task->real_parent)));
+
+	/* An entry created by the exec/fork hooks in the meantime is returned
+	 * as is, the value is only used to initialize a new entry.
+	 */
+	curr = task_storage_get(&execve_map, task, value, BPF_LOCAL_STORAGE_GET_F_CREATE);
+	if (!curr) {
+		STATS_INC(execve_map_stats, EUPDATE);
+		heap->flags |= PROC_SCAN_NOT_IN_MAP;
+	} else if (curr->key.ktime != value->key.ktime) {
+		return;
+	} else {
+		STATS_INC(execve_map_stats, COUNT);
+	}
+
+	proc_scan_record_task(task, heap);
 }
 
 /* Read the process arguments, excluding argv[0], same as read_task_args_source()
@@ -302,7 +359,10 @@ proc_scan_args(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
 	 * not freed and reused under us, and check it is still the process we
 	 * scanned.
 	 */
-	curr = execve_map_get_noinit(entry->pid);
+	if (EXECVE_MAP_TASK_STORAGE)
+		curr = task_storage_get(&execve_map, task, 0, 0);
+	else
+		curr = execve_map_get_noinit(entry->pid);
 	if (curr && curr->key.ktime == entry->ktime)
 		__bpf_memcpy_builtin(&curr->args, &heap->args, sizeof(curr->args));
 out:
@@ -326,7 +386,8 @@ int proc_scan(void *ctx)
 	bpf_rcu_read_lock();
 	bpf_for_each(task, task, NULL, BPF_TASK_ITER_ALL_PROCS)
 	{
-		proc_scan_task(task, heap);
+		if (proc_scan_task(task, heap) == PROC_SCAN_ADD)
+			proc_scan_add(task, heap);
 	}
 	bpf_rcu_read_unlock();
 
