@@ -641,6 +641,57 @@ FUNC_INLINE struct execve_map_value *execve_map_get_noinit(__u32 pid)
 	return map_lookup_elem(&execve_map, &pid);
 }
 
+/* Returns the task walks over the parents of the current process start from,
+ * see execve_map_get_ancestor().
+ */
+FUNC_INLINE struct task_struct *execve_map_walk_start(void)
+{
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return (struct task_struct *)get_current_task_btf();
+#endif
+	return 0;
+}
+
+#define EXECVE_MAP_ANCESTOR_LOOP 4
+
+/* Returns the entry of the process with the given pid, as found through the
+ * pkey of another entry.
+ *
+ * With task storage the process is searched among *task and its ancestors,
+ * and *task is moved to it so that a walk can continue from there. The pkey
+ * of an entry is the nearest ancestor that had an entry when the process was
+ * created (see __event_find_parent()), so the same number of levels is
+ * searched. A process gets reparented only when its parent exits, which
+ * deletes the parent entry, so the walk stops there as with the hash map.
+ */
+FUNC_INLINE struct execve_map_value *
+execve_map_get_ancestor(struct task_struct **task, __u32 pid)
+{
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE) {
+		struct task_struct *t = *task;
+		__u32 zero = 0;
+		int i;
+
+		if (!pid)
+			return map_lookup_elem(&execve_map_kernel, &zero);
+#pragma unroll
+		for (i = 0; i <= EXECVE_MAP_ANCESTOR_LOOP; i++) {
+			if (!t)
+				return 0;
+			if (*_(&t->tgid) == pid) {
+				*task = t;
+				return execve_map_task_get(t);
+			}
+			t = *_(&t->real_parent);
+		}
+		return 0;
+	}
+#endif
+	return map_lookup_elem(&execve_map, &pid);
+}
+
 FUNC_INLINE void execve_map_delete(__u32 pid)
 {
 	long err;

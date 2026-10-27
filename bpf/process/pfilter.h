@@ -27,7 +27,7 @@
 				goto accept;                              \
 			}                                                 \
 		}                                                         \
-		filter = map_lookup_elem(&execve_map, &filter->pkey.pid); \
+		filter = execve_map_get_ancestor(&ptask, filter->pkey.pid); \
 	}
 
 #define FIND_PIDSET10(VAL, ISNS)       \
@@ -52,6 +52,7 @@ FUNC_INLINE bool
 filter_pidset(__u64 sel, __u64 isns, struct execve_map_value *enter)
 {
 	struct execve_map_value *filter = enter;
+	struct task_struct *ptask = execve_map_walk_start();
 	bool pidset_found = false;
 
 	FIND_PIDSET10(sel, isns);
