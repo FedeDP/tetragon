@@ -21,7 +21,8 @@ type rodataConfig struct {
 	EnvVarsEnabled    uint8
 	ParentsMapEnabled uint8
 	BpfDebugEnabled   uint8
-	Pad               [3]uint8
+	ExecveTaskStorage uint8
+	Pad               [2]uint8
 }
 
 func b2u8(b bool) uint8 {
