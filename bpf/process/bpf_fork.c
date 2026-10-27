@@ -73,31 +73,13 @@ rb_clone_output(void *ctx, struct execve_map_value *curr, struct task_struct *ta
 }
 #endif
 
-__attribute__((section("kprobe/wake_up_new_task"), used)) int
-BPF_KPROBE(event_wake_up_new_task, struct task_struct *task)
+FUNC_INLINE int
+__event_wake_up_new_task(void *ctx, struct task_struct *task, __u32 tgid,
+			 struct execve_map_value *parent, struct execve_map_value *curr)
 {
-	struct execve_map_value *curr, *parent;
 	struct msg_clone_event msg;
 	u64 msg_size = sizeof(struct msg_clone_event);
-	u32 tgid = 0;
 	u64 ktime;
-
-	if (!task)
-		return 0;
-
-	tgid = BPF_CORE_READ(task, tgid);
-
-	/* Do not try to create any msg or calling execve_map_get
-	 * (that will add a new process in the execve_map) if we
-	 * cannot find it's parent in the execve_map.
-	 */
-	parent = __event_find_parent(task);
-	if (!parent)
-		return 0;
-
-	curr = execve_map_get(tgid);
-	if (!curr)
-		return 0;
 
 	/* Generate an EVENT_COMMON_FLAG_CLONE event once per process,
 	 * that is, thread group.
@@ -147,3 +129,61 @@ BPF_KPROBE(event_wake_up_new_task, struct task_struct *task)
 	event_output_metric(ctx, MSG_OP_CLONE, &msg, msg_size);
 	return 0;
 }
+
+#ifndef __V61_BPF_PROG
+__attribute__((section("kprobe/wake_up_new_task"), used)) int
+BPF_KPROBE(event_wake_up_new_task, struct task_struct *task)
+{
+	struct execve_map_value *curr, *parent;
+	u32 tgid = 0;
+
+	if (!task)
+		return 0;
+
+	tgid = BPF_CORE_READ(task, tgid);
+
+	/* Do not try to create any msg or calling execve_map_get
+	 * (that will add a new process in the execve_map) if we
+	 * cannot find it's parent in the execve_map.
+	 */
+	parent = __event_find_parent(task);
+	if (!parent)
+		return 0;
+
+	curr = execve_map_get(tgid);
+	if (!curr)
+		return 0;
+
+	return __event_wake_up_new_task(ctx, task, tgid, parent, curr);
+}
+#else
+/*
+ * The task storage execve_map needs a BTF pointer to the new task, which the
+ * kprobe on wake_up_new_task does not have. The sched_process_fork tracepoint
+ * is hit right before wake_up_new_task() in kernel_clone().
+ */
+__attribute__((section("tp_btf/sched_process_fork"), used)) int
+BPF_PROG(event_sched_process_fork, struct task_struct *ptask, struct task_struct *task)
+{
+	struct execve_map_value *curr, *parent;
+	u32 tgid;
+
+	tgid = *_(&task->tgid);
+
+	if (EXECVE_MAP_TASK_STORAGE) {
+		parent = __event_find_parent_task(task);
+		if (!parent)
+			return 0;
+		curr = execve_map_task_get_init(task);
+	} else {
+		parent = __event_find_parent(task);
+		if (!parent)
+			return 0;
+		curr = execve_map_get(tgid);
+	}
+	if (!curr)
+		return 0;
+
+	return __event_wake_up_new_task(ctx, task, tgid, parent, curr);
+}
+#endif
