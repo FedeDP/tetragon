@@ -1088,6 +1088,10 @@ func doLoadProgram(
 
 	opts.MapReplacements = pinnedMaps
 
+	for _, ms := range spec.Maps {
+		overrideMapSpec(ms)
+	}
+
 	coll, err := ebpf.NewCollectionWithOptions(spec, opts)
 	if err != nil && btfSpec != nil && load.KernelTypes != nil {
 		// here we have tried using btfSpec and failed now let's

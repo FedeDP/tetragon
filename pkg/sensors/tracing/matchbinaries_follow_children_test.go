@@ -8,8 +8,10 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -207,6 +209,37 @@ func openMap(name string) (*ebpf.Map, error) {
 	return ret, nil
 }
 
+// forEachExecveMapEntry calls fn for each execve_map entry. A task storage
+// execve_map can't be iterated, so the entries of the running processes are
+// looked up instead.
+func forEachExecveMapEntry(m *ebpf.Map, fn func(val *execvemap.ExecveValue)) {
+	var val execvemap.ExecveValue
+
+	if m.Type() != ebpf.TaskStorage {
+		var key execvemap.ExecveKey
+
+		iter := m.Iterate()
+		for iter.Next(&key, &val) {
+			fn(&val)
+		}
+		return
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		pid, err := strconv.ParseUint(e.Name(), 10, 32)
+		if err != nil {
+			continue
+		}
+		if execvemap.Lookup(m, uint32(pid), &val) == nil {
+			fn(&val)
+		}
+	}
+}
+
 // This test checks on properly updated execve_map after the
 // policy is added and removed. We do following:
 // - add tracing policy that has MatchBinaries on "forks" binary with FollowChildren
@@ -284,18 +317,13 @@ func TestMatchBinariesFollowChildrenUpdate(t *testing.T) {
 	require.NoError(t, err, "failed to open execve_map")
 	defer hash.Close()
 
-	var (
-		key   execvemap.ExecveKey
-		val   execvemap.ExecveValue
-		found int
-	)
+	var found int
 
 	// Check that all "forks" processes are updated. Let's wait (maximum 2 seconds)
 	// before "forks" fork-ed all the children to be sure we checked all of them.
 	for range 20 {
 		found = 0
-		iter := hash.Iterate()
-		for iter.Next(&key, &val) {
+		forEachExecveMapEntry(hash, func(val *execvemap.ExecveValue) {
 			// We need to ccount execve_map records with:
 			// - forks binary path
 			// - val.Binary.MBSet == 1
@@ -303,7 +331,7 @@ func TestMatchBinariesFollowChildrenUpdate(t *testing.T) {
 				val.Binary.MBSet == 1 {
 				found++
 			}
-		}
+		})
 		if found == count {
 			break
 		}
@@ -317,12 +345,11 @@ func TestMatchBinariesFollowChildrenUpdate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that all "forks" processes are updated
-	iter := hash.Iterate()
-	for iter.Next(&key, &val) {
+	forEachExecveMapEntry(hash, func(val *execvemap.ExecveValue) {
 		if unix.ByteSliceToString(val.Binary.Path[:]) == forks {
 			require.Equal(t, uint64(0), val.Binary.MBSet, "Binary.MBSet_0")
 		}
-	}
+	})
 
 	// "forks" is terminated via .Cleanup above
 }
@@ -385,11 +412,7 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 		t.Fatalf("failed to run command %s: %v", cmd, err)
 	}
 
-	var (
-		key   execvemap.ExecveKey
-		val   execvemap.ExecveValue
-		found int
-	)
+	var found int
 
 	hash, err := openMap("execve_map")
 	require.NoError(t, err, "failed to open execve_map")
@@ -399,12 +422,11 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 	// before "follow_children_1" fork-ed the children to be sure all of them started.
 	for range 20 {
 		found = 0
-		iter := hash.Iterate()
-		for iter.Next(&key, &val) {
+		forEachExecveMapEntry(hash, func(val *execvemap.ExecveValue) {
 			if unix.ByteSliceToString(val.Binary.Path[:]) == fc_1 {
 				found++
 			}
-		}
+		})
 		if found >= 2 {
 			break
 		}
@@ -447,12 +469,11 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 	// Check that "follow_children_1" process is updated with new mbset bit.
 	for range 20 {
 		found = 0
-		iter := hash.Iterate()
-		for iter.Next(&key, &val) {
+		forEachExecveMapEntry(hash, func(val *execvemap.ExecveValue) {
 			if unix.ByteSliceToString(val.Binary.Path[:]) == fc_1 && val.Binary.MBSet == 1 {
 				found++
 			}
-		}
+		})
 		if found != 0 {
 			break
 		}
@@ -466,12 +487,11 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 	require.NoError(t, err)
 
 	// Check that all "forks" processes are updated
-	iter := hash.Iterate()
-	for iter.Next(&key, &val) {
+	forEachExecveMapEntry(hash, func(val *execvemap.ExecveValue) {
 		if unix.ByteSliceToString(val.Binary.Path[:]) == fc_1 {
 			require.Equal(t, uint64(0), val.Binary.MBSet, "Binary.MBSet_0")
 		}
-	}
+	})
 
 	// "forks" is terminated via .Cleanup above
 }
