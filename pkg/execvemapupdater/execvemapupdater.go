@@ -42,10 +42,12 @@ func getRoundCnt() uint32 {
 func (upd *ExecveMapUpdater) MBSetBitClear(bit uint32, pids []uint32) error {
 	prog := upd.Load.Prog
 
-	// not used, but needed to pass program test run
-	in := make([]byte, 20)
-
-	opts := ebpf.RunOptions{Data: in}
+	var opts ebpf.RunOptions
+	// syscall programs (used with a task storage execve_map) take no data
+	if prog.Type() != ebpf.Syscall {
+		// not used, but needed to pass program test run
+		opts.Data = make([]byte, 20)
+	}
 
 	key := uint32(0)
 	val := UpdateData{
