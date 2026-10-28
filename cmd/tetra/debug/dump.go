@@ -5,6 +5,7 @@ package debug
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -95,6 +96,10 @@ func dumpExecveMap(cmd *cobra.Command, fname string) error {
 		return fmt.Errorf("failed to open execve map: %w", err)
 	}
 	defer m.Close()
+
+	if m.Type() == ebpf.TaskStorage {
+		return errors.New("execve map is a task storage map, which can't be iterated")
+	}
 
 	data := make(map[execvemap.ExecveKey]execvemap.ExecveValue)
 	iter := m.Iterate()
