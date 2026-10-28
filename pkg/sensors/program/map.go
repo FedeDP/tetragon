@@ -347,7 +347,6 @@ func (m *Map) GetFD() (int, error) {
 
 func (m *Map) LoadOrCreatePinnedMap(pinPath string, mapSpec *ebpf.MapSpec) error {
 	mapSpec = mapSpec.Copy()
-	overrideMapSpec(mapSpec)
 	if m.Configure != nil {
 		if err := m.Configure(mapSpec); err != nil {
 			return fmt.Errorf("configuring map '%s': %w", m.Name, err)
@@ -373,32 +372,6 @@ func (m *Map) LoadOrCreatePinnedMap(pinPath string, mapSpec *ebpf.MapSpec) error
 		sharedMapIncRef(m.PinPath)
 	}
 	return nil
-}
-
-// mapSpecOverrides holds the functions registered with
-// OverrideMapSpecAtInit, by ELF map name.
-var mapSpecOverrides = map[string]func(spec *ebpf.MapSpec){}
-
-// OverrideMapSpecAtInit registers fn to adjust the specification of the maps
-// named name, both when they are created or opened and when a program that
-// references them is loaded.
-//
-// Unlike Map.Configure, fn can change the fields checked by
-// MapSpec.Compatible, e.g. the map type: since it's applied to all the specs
-// of the map, they stay compatible with the pinned map.
-//
-// It must only be called at init time.
-func OverrideMapSpecAtInit(name string, fn func(spec *ebpf.MapSpec)) {
-	if _, ok := mapSpecOverrides[name]; ok {
-		panic(fmt.Sprintf("map spec override for %q already registered", name))
-	}
-	mapSpecOverrides[name] = fn
-}
-
-func overrideMapSpec(spec *ebpf.MapSpec) {
-	if fn, ok := mapSpecOverrides[spec.Name]; ok {
-		fn(spec)
-	}
 }
 
 func isValidSubdir(d string) bool {

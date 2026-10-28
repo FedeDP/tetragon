@@ -52,7 +52,11 @@ func collect(ch chan<- prometheus.Metric) {
 		if strings.HasSuffix(pin, statsSuffix) {
 			continue
 		}
-		pinStats := pin + statsSuffix
+		label := name
+		if alias, ok := mapmetrics.Aliases[name]; ok {
+			label = alias
+		}
+		pinStats := filepath.Join(option.Config.BpfDir, label) + statsSuffix
 
 		mapLinkStats, err := ebpf.LoadPinnedMap(pinStats, nil)
 		if err != nil {
@@ -73,16 +77,16 @@ func collect(ch chan<- prometheus.Metric) {
 
 		ch <- mapmetrics.MapCapacity.MustMetric(
 			float64(mapLink.MaxEntries()),
-			name,
+			label,
 		)
 		update(mapLinkStats, 0, func(sum float64) {
-			ch <- mapmetrics.MapSize.MustMetric(sum, name)
+			ch <- mapmetrics.MapSize.MustMetric(sum, label)
 		})
 		update(mapLinkStats, 1, func(sum float64) {
-			ch <- mapmetrics.MapErrorsUpdate.MustMetric(sum, name)
+			ch <- mapmetrics.MapErrorsUpdate.MustMetric(sum, label)
 		})
 		update(mapLinkStats, 2, func(sum float64) {
-			ch <- mapmetrics.MapErrorsDelete.MustMetric(sum, name)
+			ch <- mapmetrics.MapErrorsDelete.MustMetric(sum, label)
 		})
 	}
 }

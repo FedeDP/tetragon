@@ -20,6 +20,12 @@ const (
 type ExecveMapUpdater struct {
 	Load *program.Program
 	Map  *program.Map
+	// ExecveMap is the execve_map in use
+	ExecveMap *program.Map
+}
+
+func (upd *ExecveMapUpdater) ExecveMapName() string {
+	return upd.ExecveMap.Name
 }
 
 type UpdateData struct {

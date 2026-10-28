@@ -39,11 +39,11 @@ BPF_KPROBE(tg_kp_begin_new_exec)
 	leader = *_(&task->group_leader);
 	if (!leader)
 		return 0;
-	curr = task_storage_get(&execve_map, leader, 0, 0);
+	curr = task_storage_get(&execve_map_ts, leader, 0, 0);
 	if (!curr)
 		return 0;
 
-	value = task_storage_get(&execve_map, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+	value = task_storage_get(&execve_map_ts, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
 	if (!value) {
 		STATS_INC(execve_map_stats, EUPDATE);
 		return 0;

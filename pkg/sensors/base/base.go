@@ -128,11 +128,16 @@ var (
 	TCPMonMap     = program.MapBuilder("tcpmon_map", Execve)
 	RingBufEvents = program.MapBuilder(RingBufMapName, Execve, Exit, Fork, SchedProcessFork)
 	/* Networking and Process Monitoring maps */
-	ExecveMap           = program.MapBuilder("execve_map", Execve, Exit, Fork, SchedProcessFork, ExecveBprmCommit, ExecveMapUpdate, ExecveMapUpdateTask, BpfProcScan, ExecveBeginNewExec, ExecveMapAccess)
-	ExecveKernelMap     = program.MapBuilder("execve_map_kernel", Execve, ExecveMapAccess)
-	ExecveTailCallsMap  = program.MapBuilderProgram("execve_calls", Execve)
-	ExecveMapUpdateData = program.MapBuilder("execve_map_update_data", ExecveMapUpdate, ExecveMapUpdateTask)
-	BpfProcScanMap      = program.MapBuilder("tg_proc_scan_map", BpfProcScan)
+	// The execve_map is either a hash map keyed by pid, or a task storage
+	// map when ExecveMapTaskStorage() is true. The BPF objects declare both,
+	// userspace only loads the one in use: ExecveMap, set by setupSensor().
+	execveHashMap        = program.MapBuilder(execvemap.HashMapName, Execve, Exit, Fork, ExecveBprmCommit, ExecveMapUpdate)
+	execveTaskStorageMap = program.MapBuilder(execvemap.TaskStorageMapName, Execve, Exit, SchedProcessFork, ExecveBprmCommit, ExecveMapUpdateTask, BpfProcScan, ExecveBeginNewExec, ExecveMapAccess)
+	ExecveMap            = execveHashMap
+	ExecveKernelMap      = program.MapBuilder("execve_map_kernel", Execve, ExecveMapAccess)
+	ExecveTailCallsMap   = program.MapBuilderProgram("execve_calls", Execve)
+	ExecveMapUpdateData  = program.MapBuilder("execve_map_update_data", ExecveMapUpdate, ExecveMapUpdateTask)
+	BpfProcScanMap       = program.MapBuilder("tg_proc_scan_map", BpfProcScan)
 
 	ExecveJoinMap = program.MapBuilder("tg_execve_joined_info_map", ExecveBprmCommit)
 
@@ -211,12 +216,14 @@ func setupSensor() {
 	// The BPF proc scan is only used along with the task storage execve_map,
 	// see ExecveMapTaskStorage().
 	if ExecveMapTaskStorage() {
+		ExecveMap = execveTaskStorageMap
 		// The scan records every running process, so don't go below the
 		// default execve_map size. The map is not preallocated, so it only
 		// uses memory for the running processes.
 		BpfProcScanMap.SetMaxEntries(max(entries, execveMapMaxEntries))
 		logger.GetLogger().Info("execve_map uses task storage, its configured entries only size the startup scan")
 	} else {
+		ExecveMap = execveHashMap
 		ExecveMap.SetMaxEntries(entries)
 		if option.Config.ExecveMapNoPrealloc {
 			ExecveMap.SetFlag(bpf.BPF_F_NO_PREALLOC)
@@ -224,6 +231,7 @@ func setupSensor() {
 		logger.GetLogger().Info(fmt.Sprintf("Set execve_map entries %d", entries),
 			"size", strutils.SizeWithSuffix(entries*int(unsafe.Sizeof(execvemap.ExecveValue{}))))
 	}
+	unpinInactiveExecveMap()
 
 	if !config.EnableV511Progs() && option.Config.EnableProcessEnvironmentVariables {
 		Execve.RewriteConstants["ENV_VARS_ENABLED"] = uint8(1)
@@ -266,8 +274,9 @@ func initBaseSensor() *sensors.Sensor {
 	setupSensor()
 	if config.EnableLargeProgs() {
 		mbset.SetMBSetUpdater(&execvemapupdater.ExecveMapUpdater{
-			Load: execveMapUpdateProgram(),
-			Map:  ExecveMapUpdateData,
+			Load:      execveMapUpdateProgram(),
+			Map:       ExecveMapUpdateData,
+			ExecveMap: ExecveMap,
 		})
 	}
 	sensor.Progs = GetDefaultPrograms()

@@ -214,7 +214,7 @@ func CheckSensorLoad(sensors []*sensors.Sensor, sensorMaps []SensorMap, sensorPr
 		baseProgs = append(baseProgs, SensorProg{Name: "execve_map_access", Type: ebpf.Syscall})
 
 		// all programs
-		baseMaps = append(baseMaps, SensorMap{Name: "execve_map", Progs: []uint{0, 1, 2, 3, 4, 5, 6, 7, 8}})
+		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_ts", Progs: []uint{0, 1, 2, 3, 4, 5, 6, 7, 8}})
 		// all programs, but tg_kp_begin_new_exec
 		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_kernel", Progs: []uint{0, 1, 2, 3, 4, 5, 6, 8}})
 		// exit, fork, proc_scan and tg_kp_begin_new_exec

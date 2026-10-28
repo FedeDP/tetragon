@@ -117,7 +117,7 @@ execve_map_update_task(void *ctx)
 	bpf_rcu_read_lock();
 	bpf_for_each(task, task, 0, BPF_TASK_ITER_ALL_PROCS)
 	{
-		curr = task_storage_get(&execve_map, task, 0, 0);
+		curr = task_storage_get(&execve_map_ts, task, 0, 0);
 		if (curr && (curr->bin.mb_bitset & bit)) {
 			lock_and(&curr->bin.mb_bitset, ~bit);
 			data->cnt++;

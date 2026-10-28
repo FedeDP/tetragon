@@ -54,3 +54,6 @@ func ExecveMapTaskStorage() bool {
 func execveMapUpdateProgram() *program.Program {
 	return ExecveMapUpdate
 }
+
+func unpinInactiveExecveMap() {
+}

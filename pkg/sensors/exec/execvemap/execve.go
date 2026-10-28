@@ -7,6 +7,13 @@ import (
 	"github.com/cilium/tetragon/pkg/api/processapi"
 )
 
+const (
+	// HashMapName is the name of the hash execve_map, keyed by pid.
+	HashMapName = "execve_map"
+	// TaskStorageMapName is the name of the task storage execve_map.
+	TaskStorageMapName = "execve_map_ts"
+)
+
 type ExecveKey struct {
 	Pid uint32
 }

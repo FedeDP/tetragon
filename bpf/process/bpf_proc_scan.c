@@ -226,7 +226,7 @@ proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *he
 	if (!pid)
 		return 0;
 	/* the exec/fork hooks already track this process */
-	if (task_storage_get(&execve_map, task, 0, 0))
+	if (task_storage_get(&execve_map_ts, task, 0, 0))
 		return 0;
 
 	__bpf_memset_builtin(value, 0, sizeof(*value));
@@ -290,7 +290,7 @@ FUNC_INLINE void proc_scan_add(struct task_struct *task, struct proc_scan_heap *
 	/* An entry created by the exec/fork hooks in the meantime is returned
 	 * as is, the value is only used to initialize a new entry.
 	 */
-	curr = task_storage_get(&execve_map, task, value, BPF_LOCAL_STORAGE_GET_F_CREATE);
+	curr = task_storage_get(&execve_map_ts, task, value, BPF_LOCAL_STORAGE_GET_F_CREATE);
 	if (!curr) {
 		STATS_INC(execve_map_stats, EUPDATE);
 		heap->flags |= PROC_SCAN_NOT_IN_MAP;
@@ -307,7 +307,7 @@ FUNC_INLINE void proc_scan_add(struct task_struct *task, struct proc_scan_heap *
 	 * process that doesn't fit as it was before the scan, userspace runs the
 	 * scan again for it once it read the recorded ones, see RunProcScan().
 	 */
-	if (!task_storage_delete(&execve_map, task))
+	if (!task_storage_delete(&execve_map_ts, task))
 		STATS_DEC(execve_map_stats, COUNT);
 }
 
@@ -380,7 +380,7 @@ proc_scan_finish(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
 	 * not freed and reused under us, and check it is still the process we
 	 * scanned.
 	 */
-	curr = task_storage_get(&execve_map, task, 0, 0);
+	curr = task_storage_get(&execve_map_ts, task, 0, 0);
 	if (!curr || curr->key.ktime != entry->ktime) {
 		entry->flags |= PROC_SCAN_STALE;
 	} else if (heap->args.len) {

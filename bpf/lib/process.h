@@ -403,11 +403,12 @@ struct {
 
 /* The execve_map holds an entry per process, keyed by its pid.
  *
- * When EXECVE_MAP_TASK_STORAGE is set, userspace turns it into a task storage
- * map instead: the entry of a process lives on its thread group leader, so it
- * is released by the kernel together with the task, but it can only be reached
- * through the task itself, see execve_map_task_get(). The entry of the idle
- * tasks (pid 0) is kept in execve_map_kernel, as there is one idle task per cpu.
+ * When EXECVE_MAP_TASK_STORAGE is set, execve_map_ts is used instead: the
+ * entry of a process lives on its thread group leader, so it is released by
+ * the kernel together with the task, but it can only be reached through the
+ * task itself, see execve_map_task_get(). The entry of the idle tasks (pid 0)
+ * is kept in execve_map_kernel, as there is one idle task per cpu. Userspace
+ * only loads the map in use, the verifier drops the code using the other one.
  */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
@@ -418,6 +419,13 @@ struct {
 
 #ifdef __TASK_STORAGE
 #define EXECVE_MAP_TASK_STORAGE CONFIG(EXECVE_TASK_STORAGE)
+
+struct {
+	__uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, int);
+	__type(value, struct execve_map_value);
+} execve_map_ts SEC(".maps");
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);
@@ -561,7 +569,7 @@ FUNC_INLINE struct execve_map_value *execve_map_task_get(struct task_struct *tas
 	leader = *_(&task->group_leader);
 	if (!leader)
 		return 0;
-	return task_storage_get(&execve_map, leader, 0, 0);
+	return task_storage_get(&execve_map_ts, leader, 0, 0);
 }
 
 /* Same as execve_map_task_get(), but it creates a zeroed entry if the process
@@ -578,7 +586,7 @@ FUNC_INLINE struct execve_map_value *execve_map_task_get_init(struct task_struct
 	leader = *_(&task->group_leader);
 	if (!leader)
 		return 0;
-	event = task_storage_get(&execve_map, leader, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+	event = task_storage_get(&execve_map_ts, leader, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
 	if (event) {
 		STATS_INC(execve_map_stats, COUNT);
 	} else {
@@ -704,7 +712,7 @@ FUNC_INLINE void execve_map_delete(__u32 pid)
 			task = *_(&task->group_leader);
 		if (!task)
 			return;
-		err = task_storage_delete(&execve_map, task);
+		err = task_storage_delete(&execve_map_ts, task);
 	} else
 #endif
 		err = map_delete_elem(&execve_map, &pid);

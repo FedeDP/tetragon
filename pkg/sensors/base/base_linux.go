@@ -4,12 +4,14 @@
 package base
 
 import (
-	"github.com/cilium/ebpf"
-	"golang.org/x/sys/unix"
+	"errors"
+	"os"
+	"path/filepath"
 
 	"github.com/cilium/tetragon/pkg/bpf"
 	"github.com/cilium/tetragon/pkg/config"
 	"github.com/cilium/tetragon/pkg/logger"
+	"github.com/cilium/tetragon/pkg/logger/logfields"
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/sensors/program"
 	"github.com/cilium/tetragon/pkg/strutils"
@@ -31,15 +33,19 @@ func ExecveMapTaskStorage() bool {
 	return BPFProcScanEnabled()
 }
 
-func init() {
-	program.OverrideMapSpecAtInit(ExecveMap.Name, func(spec *ebpf.MapSpec) {
-		if !ExecveMapTaskStorage() {
-			return
-		}
-		spec.Type = ebpf.TaskStorage
-		spec.MaxEntries = 0
-		spec.Flags |= unix.BPF_F_NO_PREALLOC
-	})
+// unpinInactiveExecveMap removes the pin of the execve_map not in use, which a
+// previous run in the other mode may have left. The BPF objects reference both
+// maps, so the loader would otherwise keep using the stale map, which for the
+// hash map means its preallocated memory.
+func unpinInactiveExecveMap() {
+	inactive := execveHashMap
+	if ExecveMap == execveHashMap {
+		inactive = execveTaskStorageMap
+	}
+	pin := filepath.Join(bpf.MapPrefixPath(), inactive.Name)
+	if err := os.Remove(pin); err != nil && !errors.Is(err, os.ErrNotExist) {
+		logger.GetLogger().Warn("Failed to remove the inactive execve_map pin", "pin", pin, logfields.Error, err)
+	}
 }
 
 // forkProgram returns the fork program for the execve_map type.

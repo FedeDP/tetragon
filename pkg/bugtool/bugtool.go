@@ -624,6 +624,13 @@ func (s *bugtoolInfo) dumpPolicyFilterMap() error {
 }
 
 func (s *bugtoolInfo) addExecveMap() error {
+	// The bugtool doesn't run in the agent, so base.ExecveMap is always the
+	// hash map here. The task storage one can't be iterated.
+	if _, err := os.Stat(path.Join(s.info.MapDir, execvemap.TaskStorageMapName)); err == nil {
+		s.multiLog.Info("execve map is a task storage map, skipping dump")
+		return nil
+	}
+
 	fname := path.Join(s.info.MapDir, base.ExecveMap.Name)
 	m, err := ebpf.LoadPinnedMap(fname, &ebpf.LoadPinOptions{
 		ReadOnly: true,
@@ -633,12 +640,6 @@ func (s *bugtoolInfo) addExecveMap() error {
 		return err
 	}
 	defer m.Close()
-
-	// task storage maps can't be iterated
-	if m.Type() == ebpf.TaskStorage {
-		s.multiLog.Info("execve map is a task storage map, skipping dump")
-		return nil
-	}
 
 	iter := m.Iterate()
 

@@ -74,7 +74,6 @@ var (
 	)
 
 	idsMap     = program.MapBuilder("ids_map", loader)
-	execveMap  = program.MapUserFrom(base.ExecveMap)
 	ringBufMap = program.MapUserFrom(base.RingBufEvents)
 
 	loaderEnabled bool
@@ -109,7 +108,8 @@ func init() {
 }
 
 func GetLoaderSensor() *sensors.Sensor {
-	maps := []*program.Map{idsMap, execveMap}
+	// base.ExecveMap is only known once the base sensor is set up
+	maps := []*program.Map{idsMap, program.MapUserFrom(base.ExecveMap)}
 	if config.EnableV511Progs() && !option.Config.UsePerfRingBuffer {
 		maps = append(maps, ringBufMap)
 	}

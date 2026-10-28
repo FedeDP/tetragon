@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -89,16 +90,24 @@ func policyfilterCmd() *cobra.Command {
 }
 
 func dumpExecveMap(cmd *cobra.Command, fname string) error {
+	errTaskStorage := errors.New("execve map is a task storage map, which can't be iterated")
+
 	m, err := ebpf.LoadPinnedMap(fname, &ebpf.LoadPinOptions{
 		ReadOnly: true,
 	})
 	if err != nil {
+		// tetra doesn't run in the agent, so fname is the hash map pin
+		// by default, which is missing when the task storage one is used.
+		tsPin := filepath.Join(filepath.Dir(fname), execvemap.TaskStorageMapName)
+		if _, statErr := os.Stat(tsPin); errors.Is(err, os.ErrNotExist) && statErr == nil {
+			return errTaskStorage
+		}
 		return fmt.Errorf("failed to open execve map: %w", err)
 	}
 	defer m.Close()
 
 	if m.Type() == ebpf.TaskStorage {
-		return errors.New("execve map is a task storage map, which can't be iterated")
+		return errTaskStorage
 	}
 
 	data := make(map[execvemap.ExecveKey]execvemap.ExecveValue)

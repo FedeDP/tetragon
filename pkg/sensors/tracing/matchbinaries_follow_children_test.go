@@ -34,6 +34,7 @@ import (
 	"github.com/cilium/tetragon/pkg/option"
 	"github.com/cilium/tetragon/pkg/reader/namespace"
 	"github.com/cilium/tetragon/pkg/reader/notify"
+	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/sensors/exec/execvemap"
 	testsensor "github.com/cilium/tetragon/pkg/sensors/test"
 	"github.com/cilium/tetragon/pkg/testutils"
@@ -313,7 +314,7 @@ func TestMatchBinariesFollowChildrenUpdate(t *testing.T) {
 		cmd.Process.Wait()
 	})
 
-	hash, err := openMap("execve_map")
+	hash, err := openMap(base.GetExecveMap().Name)
 	require.NoError(t, err, "failed to open execve_map")
 	defer hash.Close()
 
@@ -414,7 +415,7 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 
 	var found int
 
-	hash, err := openMap("execve_map")
+	hash, err := openMap(base.GetExecveMap().Name)
 	require.NoError(t, err, "failed to open execve_map")
 	defer hash.Close()
 

@@ -62,13 +62,13 @@ execve_map_access(struct execve_map_access *ctx)
 		return -ESRCH;
 
 	if (ctx->op == EXECVE_MAP_ACCESS_UPDATE) {
-		curr = task_storage_get(&execve_map, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+		curr = task_storage_get(&execve_map_ts, task, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
 		if (curr)
 			__bpf_memcpy_builtin(curr, &ctx->value, sizeof(*curr));
 		else
 			err = -ENOMEM;
 	} else {
-		curr = task_storage_get(&execve_map, task, 0, 0);
+		curr = task_storage_get(&execve_map_ts, task, 0, 0);
 		if (curr)
 			__bpf_memcpy_builtin(&ctx->value, curr, sizeof(*curr));
 		else
