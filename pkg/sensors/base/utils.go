@@ -13,8 +13,10 @@ func IsExecve(p *program.Program) bool {
 	return p.PinName == "event_execve" && p.Policy == sensors.BaseSensorName
 }
 
+// IsFork returns true if this is a base fork program, Fork or SchedProcessFork
 func IsFork(p *program.Program) bool {
-	return p.PinName == "kprobe_pid_clear" && p.Policy == sensors.BaseSensorName
+	return (p.PinName == Fork.PinName || p.PinName == SchedProcessFork.PinName) &&
+		p.Policy == sensors.BaseSensorName
 }
 
 func IsExit(p *program.Program) bool {

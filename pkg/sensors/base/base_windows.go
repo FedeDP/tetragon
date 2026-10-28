@@ -51,6 +51,6 @@ func ExecveMapTaskStorage() bool {
 	return false
 }
 
-func setupExecveMapTaskStorage() bool {
-	return false
+func execveMapUpdateProgram() *program.Program {
+	return ExecveMapUpdate
 }

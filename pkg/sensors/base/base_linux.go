@@ -42,34 +42,30 @@ func init() {
 	})
 }
 
-// setupExecveMapTaskStorage selects the programs needed by a task storage
-// execve_map, and returns false if the execve_map is a hash map.
-func setupExecveMapTaskStorage() bool {
-	if !ExecveMapTaskStorage() {
-		return false
+// forkProgram returns the fork program for the execve_map type.
+func forkProgram() *program.Program {
+	if ExecveMapTaskStorage() {
+		return SchedProcessFork
 	}
+	return Fork
+}
 
-	// The wake_up_new_task kprobe has no BTF pointer to the new task,
-	// which the task storage helpers need.
-	Fork.Name = "bpf_fork_v61.o"
-	Fork.Attach = "sched_process_fork"
-	Fork.Label = "tp_btf/sched_process_fork"
-	Fork.Type = "tp_btf"
-
-	// Socket programs can't get to the tasks.
-	ExecveMapUpdate.Name = "bpf_execve_map_update_v61.o"
-	ExecveMapUpdate.Attach = "syscall"
-	ExecveMapUpdate.Label = "syscall"
-	return true
+// execveMapUpdateProgram returns the program used by the mbset updater for
+// the execve_map type.
+func execveMapUpdateProgram() *program.Program {
+	if ExecveMapTaskStorage() {
+		return ExecveMapUpdateTask
+	}
+	return ExecveMapUpdate
 }
 
 func GetDefaultPrograms() []*program.Program {
 	progs := []*program.Program{
 		Exit,
-		Fork,
+		forkProgram(),
 		Execve,
 		ExecveBprmCommit,
-		ExecveMapUpdate,
+		execveMapUpdateProgram(),
 	}
 	if BPFProcScanEnabled() {
 		progs = append(progs, BpfProcScan)

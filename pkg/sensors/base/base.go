@@ -102,14 +102,36 @@ var (
 		"kprobe",
 	).SetPolicy(sensors.BaseSensorName)
 
+	// SchedProcessFork replaces Fork when ExecveMapTaskStorage() is true:
+	// the task storage helpers need a BTF pointer to the new task, which
+	// the wake_up_new_task kprobe doesn't have.
+	SchedProcessFork = program.Builder(
+		"bpf_fork_v61.o",
+		"sched_process_fork",
+		"tp_btf/sched_process_fork",
+		"event_sched_process_fork",
+		"tp_btf",
+	).SetPolicy(sensors.BaseSensorName)
+
+	// ExecveMapUpdateTask replaces ExecveMapUpdate when
+	// ExecveMapTaskStorage() is true: socket programs can't get to the
+	// tasks.
+	ExecveMapUpdateTask = program.Builder(
+		"bpf_execve_map_update_v61.o",
+		"syscall",
+		"syscall",
+		"execve_map_update_task",
+		"socket",
+	).SetPolicy(sensors.BaseSensorName)
+
 	/* Event Ring map */
 	TCPMonMap     = program.MapBuilder("tcpmon_map", Execve)
-	RingBufEvents = program.MapBuilder(RingBufMapName, Execve, Exit, Fork)
+	RingBufEvents = program.MapBuilder(RingBufMapName, Execve, Exit, Fork, SchedProcessFork)
 	/* Networking and Process Monitoring maps */
-	ExecveMap           = program.MapBuilder("execve_map", Execve, Exit, Fork, ExecveBprmCommit, ExecveMapUpdate, BpfProcScan, ExecveBeginNewExec, ExecveMapAccess)
+	ExecveMap           = program.MapBuilder("execve_map", Execve, Exit, Fork, SchedProcessFork, ExecveBprmCommit, ExecveMapUpdate, ExecveMapUpdateTask, BpfProcScan, ExecveBeginNewExec, ExecveMapAccess)
 	ExecveKernelMap     = program.MapBuilder("execve_map_kernel", Execve, ExecveMapAccess)
 	ExecveTailCallsMap  = program.MapBuilderProgram("execve_calls", Execve)
-	ExecveMapUpdateData = program.MapBuilder("execve_map_update_data", ExecveMapUpdate)
+	ExecveMapUpdateData = program.MapBuilder("execve_map_update_data", ExecveMapUpdate, ExecveMapUpdateTask)
 	BpfProcScanMap      = program.MapBuilder("tg_proc_scan_map", BpfProcScan)
 
 	ExecveJoinMap = program.MapBuilder("tg_execve_joined_info_map", ExecveBprmCommit)
@@ -188,7 +210,7 @@ func setupSensor() {
 
 	// The BPF proc scan is only used along with the task storage execve_map,
 	// see ExecveMapTaskStorage().
-	if setupExecveMapTaskStorage() {
+	if ExecveMapTaskStorage() {
 		// The scan records every running process, so don't go below the
 		// default execve_map size. The map is not preallocated, so it only
 		// uses memory for the running processes.
@@ -244,7 +266,7 @@ func initBaseSensor() *sensors.Sensor {
 	setupSensor()
 	if config.EnableLargeProgs() {
 		mbset.SetMBSetUpdater(&execvemapupdater.ExecveMapUpdater{
-			Load: ExecveMapUpdate,
+			Load: execveMapUpdateProgram(),
 			Map:  ExecveMapUpdateData,
 		})
 	}
