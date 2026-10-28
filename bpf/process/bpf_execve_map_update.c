@@ -38,19 +38,6 @@ __execve_map_update_idx(struct update_data *data, int idx)
 		return 1;
 
 	pid = data->pids[idx];
-#ifdef __V61_BPF_PROG
-	if (EXECVE_MAP_TASK_STORAGE) {
-		struct task_struct *task = bpf_task_from_pid(pid);
-
-		if (!task)
-			return 0;
-		curr = task_storage_get(&execve_map, task, 0, 0);
-		if (curr)
-			lock_and(&curr->bin.mb_bitset, ~(1 << data->bit));
-		bpf_task_release(task);
-		return 0;
-	}
-#endif
 	curr = execve_map_get_noinit(pid);
 	if (curr)
 		lock_and(&curr->bin.mb_bitset, ~(1 << data->bit));
@@ -101,18 +88,42 @@ execve_map_update(void *ctx)
 
 #ifdef __V61_BPF_PROG
 /* The task storage execve_map entries can only be reached through the tasks,
- * which socket programs can't get, so it's updated by a syscall program.
+ * which socket programs can't get, and userspace can't iterate the map to find
+ * the pids with the bit set. So this syscall program walks all the processes
+ * and clears the bit itself, ignoring data->pids. It returns the number of
+ * entries that had the bit set.
  */
 __attribute__((section("syscall"), used)) int
 execve_map_update_task(void *ctx)
 {
+	struct execve_map_value *curr;
 	struct update_data *data;
+	struct task_struct *task;
 	__u32 idx = 0;
+	__u64 bit;
+
+	if (!EXECVE_MAP_TASK_STORAGE)
+		return -1;
 
 	data = map_lookup_elem(&execve_map_update_data, &idx);
 	if (!data)
 		return -1;
-	__execve_map_update(data);
-	return 0;
+
+	bit = 1ULL << (data->bit & 63);
+	/* Counted in the map value rather than on the stack, so the verifier
+	 * does not track it and the iterator loop states can converge.
+	 */
+	data->cnt = 0;
+	bpf_rcu_read_lock();
+	bpf_for_each(task, task, 0, BPF_TASK_ITER_ALL_PROCS)
+	{
+		curr = task_storage_get(&execve_map, task, 0, 0);
+		if (curr && (curr->bin.mb_bitset & bit)) {
+			lock_and(&curr->bin.mb_bitset, ~bit);
+			data->cnt++;
+		}
+	}
+	bpf_rcu_read_unlock();
+	return data->cnt;
 }
 #endif

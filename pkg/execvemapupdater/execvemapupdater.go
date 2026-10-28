@@ -93,3 +93,23 @@ func (upd *ExecveMapUpdater) MBSetBitClear(bit uint32, pids []uint32) error {
 
 	return err
 }
+
+// MBSetBitClearAll clears bit from all the execve_map entries, and returns the
+// number of entries that had it set. It needs the execve_map_update_task
+// program, used with a task storage execve_map, which walks all the
+// processes rather than a list of pids.
+func (upd *ExecveMapUpdater) MBSetBitClearAll(bit uint32) (uint32, error) {
+	prog := upd.Load.Prog
+	if prog.Type() != ebpf.Syscall {
+		return 0, errors.New("clearing the bit from all the entries needs the execve_map_update_task program")
+	}
+
+	if err := upd.Map.MapHandle.Update(uint32(0), UpdateData{bit: bit}, 0); err != nil {
+		return 0, errors.New("failed to update data map value")
+	}
+	ret, err := prog.Run(&ebpf.RunOptions{})
+	if err != nil || int32(ret) < 0 {
+		return 0, errors.New("failed to update map values")
+	}
+	return ret, nil
+}

@@ -27,6 +27,10 @@ const (
 
 type UpdateExecveMap interface {
 	MBSetBitClear(bit uint32, pids []uint32) error
+	// MBSetBitClearAll clears bit from all the entries, and returns the
+	// number of entries that had it set. It's used with a task storage
+	// execve_map, which can't be iterated.
+	MBSetBitClearAll(bit uint32) (uint32, error)
 }
 
 type bitSet = uint64
@@ -130,6 +134,20 @@ func (s *state) RemoveID(id uint32, paths [][processapi.BINARY_PATH_MAX_LEN]byte
 	// routine for the removal.
 	updatePids := func() error {
 		for idx := range 5 {
+			if hash.Type() == ebpf.TaskStorage {
+				cnt, err := update.MBSetBitClearAll(id)
+				if err != nil {
+					return err
+				}
+				if cnt == 0 {
+					return nil
+				}
+				if idx != 0 {
+					time.Sleep(500 * time.Millisecond)
+				}
+				continue
+			}
+
 			var (
 				key  execvemap.ExecveKey
 				val  execvemap.ExecveValue
