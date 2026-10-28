@@ -27,8 +27,8 @@ import (
 const (
 	ProcScanKthread  = 0x1
 	ProcScanCwdError = 0x2
-	// ProcScanNotInMap is set if the process could not be added to
-	// execve_map, i.e. the map is full.
+	// ProcScanNotInMap is set if the execve_map entry of the process could
+	// not be allocated.
 	ProcScanNotInMap = 0x4
 	// ProcScanStale is set if the process exited, or exec-ed and was
 	// reported by the exec hook, after the scan.
@@ -104,12 +104,9 @@ func procScan() ([]ProcScanEntry, error) {
 			entries = append(entries, e)
 		}
 
-		// With a task storage execve_map, the processes that don't fit
-		// in tg_proc_scan_map are left for the next run, which skips
-		// the ones recorded so far. That's not the case with the hash
-		// execve_map, where the processes that don't fit in it would
-		// be recorded again by every run.
-		if !base.ExecveMapTaskStorage() || cnt < m.MaxEntries() {
+		// The processes that don't fit in tg_proc_scan_map are left for
+		// the next run, which skips the ones recorded so far.
+		if cnt < m.MaxEntries() {
 			return entries, nil
 		}
 		logger.GetLogger().Info("BPF proc scan map is full, scanning again", "entries", len(entries))

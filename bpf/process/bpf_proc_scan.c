@@ -23,19 +23,19 @@ char _license[] __attribute__((section("license"), used)) = "Dual BSD/GPL";
  * scan sees all the host processes even when tetragon runs in a pod without
  * hostPID.
  *
+ * It's only used along with the task storage execve_map, see
+ * ExecveMapTaskStorage() in pkg/sensors/base.
+ *
  * The scan is done in two passes:
  *  - the first pass runs under RCU and adds an execve_map entry for every
  *    process, unless the entry already exists (i.e. it was created by the
- *    exec/fork hooks in the meantime). It also records each process not
- *    already tracked in tg_proc_scan_map, together with the details userspace
- *    needs to build the startup execve events (credentials, cwd and cgroup).
- *    Processes that could not be added to execve_map (i.e. the map is full)
- *    are recorded too, flagged with PROC_SCAN_NOT_IN_MAP, so that userspace
- *    still reports them as the procfs scan does.
- *    When execve_map is a task storage map, the entries are created from the
- *    iterator loop rather than from proc_scan_task(), see proc_scan_add(), and
- *    the processes that don't fit in tg_proc_scan_map are left for the next
- *    run of the program.
+ *    exec/fork hooks in the meantime), see proc_scan_add(). It also records
+ *    each process not already tracked in tg_proc_scan_map, together with the
+ *    details userspace needs to build the startup execve events (credentials,
+ *    cwd and cgroup). Processes whose entry could not be allocated are
+ *    recorded too, flagged with PROC_SCAN_NOT_IN_MAP, so that userspace still
+ *    reports them as the procfs scan does. The processes that don't fit in
+ *    tg_proc_scan_map are left for the next run of the program.
  *  - the second pass reads the arguments of the recorded processes. Reading
  *    another process memory with copy_from_user_task() can sleep, which is not
  *    allowed under RCU, hence the separate pass. It also flags the processes
@@ -61,7 +61,7 @@ char _license[] __attribute__((section("license"), used)) = "Dual BSD/GPL";
 
 #define PROC_SCAN_KTHREAD   0x1
 #define PROC_SCAN_CWD_ERROR 0x2
-/* the process could not be added to execve_map, i.e. the map is full */
+/* the execve_map entry of the process could not be allocated */
 #define PROC_SCAN_NOT_IN_MAP 0x4
 /* the process exited, or exec-ed and was reported by the exec hook */
 #define PROC_SCAN_STALE 0x8
@@ -199,12 +199,14 @@ proc_scan_record(struct task_struct *task, struct proc_scan_heap *heap, __u32 fl
 		heap->cnt = idx + 1;
 }
 
-/* proc_scan_task() return value when the process entry must be added to the
- * task storage execve_map by proc_scan_add().
+/* proc_scan_task() return value when the process entry must be added to
+ * execve_map by proc_scan_add().
  */
 #define PROC_SCAN_ADD 1
 
-/* Global function, so the verifier checks it once rather than on every
+/* Fills the execve_map entry of the process in heap->value.
+ *
+ * Global function, so the verifier checks it once rather than on every
  * iteration of the task iterator loop, where the states of this (large) body
  * would not converge and the program would hit the complexity limit.
  */
@@ -212,17 +214,19 @@ __attribute__((noinline)) int
 proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *heap __arg_nonnull)
 {
 	struct execve_map_value *value = &heap->value;
-	struct execve_map_value *parent;
 	struct task_struct *ptask;
 	__u32 pid, flags = 0;
-	long err;
+
+	/* global functions are verified on their own, see proc_scan() */
+	if (!EXECVE_MAP_TASK_STORAGE)
+		return 0;
 
 	pid = BPF_CORE_READ(task, tgid);
 	/* idle task, the kernel entry is added by userspace */
 	if (!pid)
 		return 0;
 	/* the exec/fork hooks already track this process */
-	if (EXECVE_MAP_TASK_STORAGE && task_storage_get(&execve_map, task, 0, 0))
+	if (task_storage_get(&execve_map, task, 0, 0))
 		return 0;
 
 	__bpf_memset_builtin(value, 0, sizeof(*value));
@@ -250,30 +254,8 @@ proc_scan_task(struct task_struct *task __arg_trusted, struct proc_scan_heap *he
 	}
 	copy_exe_to_bin(&heap->exe, &value->bin);
 
-	if (EXECVE_MAP_TASK_STORAGE) {
-		heap->flags = flags;
-		return PROC_SCAN_ADD;
-	}
-
-	/* Processes are walked in fork order, so the parent was already added
-	 * unless the process got reparented.
-	 */
-	parent = execve_map_get_noinit(value->pkey.pid);
-	set_in_init_tree(value, parent);
-
-	err = map_update_elem(&execve_map, &pid, value, BPF_NOEXIST);
-	/* the exec/fork hooks already track this process */
-	if (err == -EEXIST)
-		return 0;
-	if (err) {
-		STATS_INC(execve_map_stats, EUPDATE);
-		flags |= PROC_SCAN_NOT_IN_MAP;
-	} else {
-		STATS_INC(execve_map_stats, COUNT);
-	}
-
-	proc_scan_record(task, heap, flags);
-	return 0;
+	heap->flags = flags;
+	return PROC_SCAN_ADD;
 }
 
 /* Global function for the same reason as proc_scan_task(). Returns 1 if the
@@ -288,7 +270,7 @@ proc_scan_record_task(struct task_struct *task __arg_trusted, struct proc_scan_h
 	return heap->cnt != cnt;
 }
 
-/* Adds the entry filled by proc_scan_task() to the task storage execve_map.
+/* Adds the entry filled by proc_scan_task() to execve_map, and records it.
  *
  * It runs from the iterator loop, which holds the RCU read lock: the verifier
  * only lets us walk task->real_parent there and makes the entry allocation
@@ -321,10 +303,9 @@ FUNC_INLINE void proc_scan_add(struct task_struct *task, struct proc_scan_heap *
 	if (proc_scan_record_task(task, heap) || !curr)
 		return;
 
-	/* Unlike the hash execve_map, the task storage one is not bounded by
-	 * the tg_proc_scan_map size. Leave a process that doesn't fit as it was
-	 * before the scan, userspace runs the scan again for it once it read
-	 * the recorded ones, see RunProcScan().
+	/* execve_map is not bounded by the tg_proc_scan_map size. Leave a
+	 * process that doesn't fit as it was before the scan, userspace runs the
+	 * scan again for it once it read the recorded ones, see RunProcScan().
 	 */
 	if (!task_storage_delete(&execve_map, task))
 		STATS_DEC(execve_map_stats, COUNT);
@@ -399,10 +380,7 @@ proc_scan_finish(struct proc_scan_entry *entry, struct proc_scan_heap *heap)
 	 * not freed and reused under us, and check it is still the process we
 	 * scanned.
 	 */
-	if (EXECVE_MAP_TASK_STORAGE)
-		curr = task_storage_get(&execve_map, task, 0, 0);
-	else
-		curr = execve_map_get_noinit(entry->pid);
+	curr = task_storage_get(&execve_map, task, 0, 0);
 	if (!curr || curr->key.ktime != entry->ktime) {
 		entry->flags |= PROC_SCAN_STALE;
 	} else if (heap->args.len) {
@@ -421,6 +399,10 @@ int proc_scan(void *ctx)
 	struct task_struct *task, *ref;
 	__u32 zero = 0, cnt;
 	int i;
+
+	/* the scan only works with the task storage execve_map */
+	if (!EXECVE_MAP_TASK_STORAGE)
+		return 0;
 
 	heap = map_lookup_elem(&tg_proc_scan_heap, &zero);
 	if (!heap)
