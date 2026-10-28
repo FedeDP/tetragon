@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/tetragon/pkg/matchers/stringmatcher"
 	"github.com/cilium/tetragon/pkg/observer/observertesthelper"
 	"github.com/cilium/tetragon/pkg/option"
+	"github.com/cilium/tetragon/pkg/sensors/base"
 	"github.com/cilium/tetragon/pkg/testutils"
 	tus "github.com/cilium/tetragon/pkg/testutils/sensors"
 
@@ -120,6 +121,9 @@ func TestKprobeSigkillExecveMap1(t *testing.T) {
 	if !kernels.MinKernelVersion("5.3.0") {
 		t.Skip("sigkill requires at least 5.3.0 version")
 	}
+	if base.ExecveMapTaskStorage() {
+		t.Skip("task storage execve_map has no max entries")
+	}
 
 	// makeSpecFile creates a new spec file bsed on the template, and the provided arguments
 	makeSpecFile := func(pid string) string {
@@ -154,6 +158,9 @@ func TestKprobeSigkillExecveMap1(t *testing.T) {
 func TestTracepointSigkillExecveMap1(t *testing.T) {
 	if !kernels.MinKernelVersion("5.3.0") {
 		t.Skip("sigkill requires at least 5.3.0 version")
+	}
+	if base.ExecveMapTaskStorage() {
+		t.Skip("task storage execve_map has no max entries")
 	}
 
 	// makeSpecFile creates a new spec file bsed on the template, and the provided arguments

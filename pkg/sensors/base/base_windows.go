@@ -44,3 +44,16 @@ func GetDefaultMaps() []*program.Map {
 func BPFProcScanEnabled() bool {
 	return false
 }
+
+// ExecveMapTaskStorage returns false, execve_map is never a task storage map
+// on Windows.
+func ExecveMapTaskStorage() bool {
+	return false
+}
+
+func execveMapUpdateProgram() *program.Program {
+	return ExecveMapUpdate
+}
+
+func unpinInactiveExecveMap() {
+}

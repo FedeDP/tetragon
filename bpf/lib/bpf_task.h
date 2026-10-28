@@ -102,12 +102,37 @@ FUNC_INLINE __u32 event_find_parent_pid(struct task_struct *t)
 	return pid;
 }
 
+#ifdef __TASK_STORAGE
+/* Same as __event_find_parent(), for a BTF task pointer. */
+FUNC_INLINE struct execve_map_value *
+__event_find_parent_task(struct task_struct *task)
+{
+	struct execve_map_value *value;
+	int i;
+
+#pragma unroll
+	for (i = 0; i < 4; i++) {
+		if (!task)
+			break;
+		task = *_(&task->real_parent);
+		value = execve_map_task_get(task);
+		if (value && value->key.ktime != 0)
+			return value;
+	}
+	return 0;
+}
+#endif
+
 FUNC_INLINE struct execve_map_value *
 __event_find_parent(struct task_struct *task)
 {
 	__u32 pid;
 	struct execve_map_value *value = 0;
 	int i;
+
+	/* the task storage lookups need a BTF task pointer */
+	if (EXECVE_MAP_TASK_STORAGE)
+		return 0;
 
 #pragma unroll
 	for (i = 0; i < 4; i++) {
@@ -124,8 +149,13 @@ __event_find_parent(struct task_struct *task)
 
 FUNC_INLINE struct execve_map_value *event_find_parent(void)
 {
-	struct task_struct *task = (struct task_struct *)get_current_task();
+	struct task_struct *task;
 
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return __event_find_parent_task((struct task_struct *)get_current_task_btf());
+#endif
+	task = (struct task_struct *)get_current_task();
 	return __event_find_parent(task);
 }
 
@@ -144,12 +174,44 @@ FUNC_INLINE void event_minimal_curr(struct execve_map_value *event)
 	event->flags = EVENT_MISS;
 }
 
+#ifdef __TASK_STORAGE
+/* Same as event_find_curr(), walking BTF task pointers. */
+FUNC_INLINE struct execve_map_value *event_find_curr_task(__u32 *ppid, bool *walked)
+{
+	struct task_struct *task = (struct task_struct *)get_current_task_btf();
+	struct execve_map_value *value = 0;
+	__u32 pid = 0;
+	int i;
+
+#pragma unroll
+	for (i = 0; i < 4; i++) {
+		pid = *_(&task->tgid);
+		value = execve_map_task_get(task);
+		if (value && value->key.ktime != 0)
+			break;
+		value = 0;
+		*walked = 1;
+		task = *_(&task->real_parent);
+		if (!task)
+			break;
+	}
+	*ppid = pid;
+	return value;
+}
+#endif
+
 FUNC_INLINE struct execve_map_value *event_find_curr(__u32 *ppid, bool *walked)
 {
-	struct task_struct *task = (struct task_struct *)get_current_task();
+	struct task_struct *task;
 	struct execve_map_value *value = 0;
 	int i;
 	__u32 pid;
+
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return event_find_curr_task(ppid, walked);
+#endif
+	task = (struct task_struct *)get_current_task();
 
 #pragma unroll
 	for (i = 0; i < 4; i++) {

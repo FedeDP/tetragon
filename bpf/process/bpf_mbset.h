@@ -48,12 +48,13 @@ void update_mb_bitset(struct binary *bin)
 #ifdef __V511_BPF_PROG
 
 FUNC_INLINE
-struct execve_map_value *__update_mb_task(struct execve_map_value *task, struct binary *bin)
+struct execve_map_value *__update_mb_task(struct execve_map_value *task, struct task_struct **ptask,
+					  struct binary *bin)
 {
 	struct execve_map_value *parent;
 	__u64 *bitsetp;
 
-	parent = execve_map_get_noinit(task->pkey.pid);
+	parent = execve_map_get_ancestor(ptask, task->pkey.pid);
 	if (!parent)
 		return NULL;
 	bitsetp = map_lookup_elem(&tg_mbset_map, parent->bin.path);
@@ -66,6 +67,7 @@ FUNC_INLINE
 void update_mb_task(struct execve_map_value *task, struct binary *bin)
 {
 	struct execve_map_value *last = NULL, *parent = task;
+	struct task_struct *ptask = execve_map_walk_start();
 	__u32 idx = 0;
 	__u64 *gen;
 
@@ -78,14 +80,14 @@ void update_mb_task(struct execve_map_value *task, struct binary *bin)
 	if (CONFIG(ITER_NUM)) {
 		bpf_repeat(100000)
 		{
-			parent = __update_mb_task(task, bin);
+			parent = __update_mb_task(task, &ptask, bin);
 			if (!parent || parent == last)
 				break;
 			last = parent;
 		}
 	} else {
 		for (int i = 0; i < 1024; i++) {
-			parent = __update_mb_task(task, bin);
+			parent = __update_mb_task(task, &ptask, bin);
 			if (!parent || parent == last)
 				break;
 			last = parent;

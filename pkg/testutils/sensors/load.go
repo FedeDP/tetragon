@@ -198,7 +198,31 @@ func CheckSensorLoad(sensors []*sensors.Sensor, sensorMaps []SensorMap, sensorPr
 		baseMaps = append(baseMaps, SensorMap{Name: "cgroup_rate_map", Progs: progs})
 	}
 
-	if cfg.EnableLargeProgs() {
+	if base.ExecveMapTaskStorage() {
+		// fork is a tp_btf program
+		baseProgs[2] = SensorProg{Name: "event_sched_process_fork", Type: ebpf.Tracing}
+
+		// 5: proc_scan
+		baseProgs = append(baseProgs, SensorProg{Name: "proc_scan", Type: ebpf.Syscall})
+		baseMaps = append(baseMaps, SensorMap{Name: "tg_proc_scan_map", Progs: []uint{5}})
+
+		// 6: execve_map_update_task, in the same object as execve_map_update
+		baseProgs = append(baseProgs, SensorProg{Name: "execve_map_update_task", Type: ebpf.Syscall})
+		// 7: tg_kp_begin_new_exec
+		baseProgs = append(baseProgs, SensorProg{Name: "tg_kp_begin_new_exec", Type: ebpf.Kprobe})
+		// 8: execve_map_access
+		baseProgs = append(baseProgs, SensorProg{Name: "execve_map_access", Type: ebpf.Syscall})
+
+		// all programs
+		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_ts", Progs: []uint{0, 1, 2, 3, 4, 5, 6, 7, 8}})
+		// all programs, but tg_kp_begin_new_exec
+		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_kernel", Progs: []uint{0, 1, 2, 3, 4, 5, 6, 8}})
+		// exit, fork, proc_scan and tg_kp_begin_new_exec
+		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_stats", Progs: []uint{1, 2, 5, 7}})
+
+		// execve_map_update and execve_map_update_task
+		baseMaps = append(baseMaps, SensorMap{Name: "execve_map_update_data", Progs: []uint{4, 6}})
+	} else if cfg.EnableLargeProgs() {
 		if base.BPFProcScanEnabled() {
 			// 5: proc_scan
 			baseProgs = append(baseProgs, SensorProg{Name: "proc_scan", Type: ebpf.Syscall})

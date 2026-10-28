@@ -21,7 +21,8 @@ type rodataConfig struct {
 	EnvVarsEnabled    uint8
 	ParentsMapEnabled uint8
 	BpfDebugEnabled   uint8
-	Pad               [3]uint8
+	ExecveTaskStorage uint8
+	Pad               [2]uint8
 }
 
 func b2u8(b bool) uint8 {
@@ -49,12 +50,16 @@ func rodataCurrent() rodataConfig {
 	// bpf debug match enabled by --bpf-debug
 	bpfDebugEnabled := option.Config.BPFDebugAreas.ToBPFConfig()
 
+	// execve_map is a task storage map, see ExecveMapTaskStorage()
+	execveTaskStorage := b2u8(ExecveMapTaskStorage())
+
 	return rodataConfig{
 		IterNum:           iterNum,
 		UsePerfRingBuf:    usePerfRingBuf,
 		EnvVarsEnabled:    envVarsEnabled,
 		ParentsMapEnabled: parentsMapEnabled,
 		BpfDebugEnabled:   bpfDebugEnabled,
+		ExecveTaskStorage: execveTaskStorage,
 	}
 }
 

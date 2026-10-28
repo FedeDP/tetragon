@@ -401,12 +401,41 @@ struct {
 } tg_parents_bin SEC(".maps");
 #endif
 
+/* The execve_map holds an entry per process, keyed by its pid.
+ *
+ * When EXECVE_MAP_TASK_STORAGE is set, execve_map_ts is used instead: the
+ * entry of a process lives on its thread group leader, so it is released by
+ * the kernel together with the task, but it can only be reached through the
+ * task itself, see execve_map_task_get(). The entry of the idle tasks (pid 0)
+ * is kept in execve_map_kernel, as there is one idle task per cpu. Userspace
+ * only loads the map in use, the verifier drops the code using the other one.
+ */
 struct {
 	__uint(type, BPF_MAP_TYPE_HASH);
 	__uint(max_entries, 1);
 	__type(key, __u32);
 	__type(value, struct execve_map_value);
 } execve_map SEC(".maps");
+
+#ifdef __TASK_STORAGE
+#define EXECVE_MAP_TASK_STORAGE CONFIG(EXECVE_TASK_STORAGE)
+
+struct {
+	__uint(type, BPF_MAP_TYPE_TASK_STORAGE);
+	__uint(map_flags, BPF_F_NO_PREALLOC);
+	__type(key, int);
+	__type(value, struct execve_map_value);
+} execve_map_ts SEC(".maps");
+
+struct {
+	__uint(type, BPF_MAP_TYPE_ARRAY);
+	__uint(max_entries, 1);
+	__type(key, __u32);
+	__type(value, struct execve_map_value);
+} execve_map_kernel SEC(".maps");
+#else
+#define EXECVE_MAP_TASK_STORAGE 0
+#endif
 
 enum {
 	MAP_STATS_COUNT = 0,
@@ -524,12 +553,72 @@ FUNC_INLINE void stats_update(struct bpf_map_def *map, __u32 key, int inc)
 #define STATS_INC(map, key) stats_update((struct bpf_map_def *)&(map), MAP_STATS_##key, 1)
 #define STATS_DEC(map, key) stats_update((struct bpf_map_def *)&(map), MAP_STATS_##key, -1)
 
+#ifdef __TASK_STORAGE
+/* Returns the execve_map entry of the process @task belongs to, the task
+ * storage helpers need a BTF pointer to it.
+ */
+FUNC_INLINE struct execve_map_value *execve_map_task_get(struct task_struct *task)
+{
+	struct task_struct *leader;
+	__u32 zero = 0;
+
+	if (!task)
+		return 0;
+	if (!*_(&task->tgid))
+		return map_lookup_elem(&execve_map_kernel, &zero);
+	leader = *_(&task->group_leader);
+	if (!leader)
+		return 0;
+	return task_storage_get(&execve_map_ts, leader, 0, 0);
+}
+
+/* Same as execve_map_task_get(), but it creates a zeroed entry if the process
+ * has none.
+ */
+FUNC_INLINE struct execve_map_value *execve_map_task_get_init(struct task_struct *task)
+{
+	struct execve_map_value *event;
+	struct task_struct *leader;
+
+	event = execve_map_task_get(task);
+	if (event || !task)
+		return event;
+	leader = *_(&task->group_leader);
+	if (!leader)
+		return 0;
+	event = task_storage_get(&execve_map_ts, leader, 0, BPF_LOCAL_STORAGE_GET_F_CREATE);
+	if (event) {
+		STATS_INC(execve_map_stats, COUNT);
+	} else {
+		/* -ENOMEM or -EBUSY on recursion */
+		STATS_INC(execve_map_stats, EUPDATE);
+	}
+	return event;
+}
+
+/* With task storage, only the entry of the current process can be looked up
+ * by pid, there is no entry for any other pid.
+ */
+FUNC_INLINE struct task_struct *execve_map_current(__u32 pid)
+{
+	struct task_struct *task = (struct task_struct *)get_current_task_btf();
+
+	if (*_(&task->tgid) != pid)
+		return 0;
+	return task;
+}
+#endif /* __TASK_STORAGE */
+
 // execve_map_get will look up if pid exists and return it if it does. If it
 // does not, it will create a new one and return it.
 FUNC_INLINE struct execve_map_value *execve_map_get(__u32 pid)
 {
 	struct execve_map_value *event;
 
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return execve_map_task_get_init(execve_map_current(pid));
+#endif
 	event = map_lookup_elem(&execve_map, &pid);
 	if (!event) {
 		struct execve_map_value *value;
@@ -553,12 +642,80 @@ FUNC_INLINE struct execve_map_value *execve_map_get(__u32 pid)
 
 FUNC_INLINE struct execve_map_value *execve_map_get_noinit(__u32 pid)
 {
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return execve_map_task_get(execve_map_current(pid));
+#endif
+	return map_lookup_elem(&execve_map, &pid);
+}
+
+/* Returns the task walks over the parents of the current process start from,
+ * see execve_map_get_ancestor().
+ */
+FUNC_INLINE struct task_struct *execve_map_walk_start(void)
+{
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE)
+		return (struct task_struct *)get_current_task_btf();
+#endif
+	return 0;
+}
+
+#define EXECVE_MAP_ANCESTOR_LOOP 4
+
+/* Returns the entry of the process with the given pid, as found through the
+ * pkey of another entry.
+ *
+ * With task storage the process is searched among *task and its ancestors,
+ * and *task is moved to it so that a walk can continue from there. The pkey
+ * of an entry is the nearest ancestor that had an entry when the process was
+ * created (see __event_find_parent()), so the same number of levels is
+ * searched. A process gets reparented only when its parent exits, which
+ * deletes the parent entry, so the walk stops there as with the hash map.
+ */
+FUNC_INLINE struct execve_map_value *
+execve_map_get_ancestor(struct task_struct **task, __u32 pid)
+{
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE) {
+		struct task_struct *t = *task;
+		__u32 zero = 0;
+		int i;
+
+		if (!pid)
+			return map_lookup_elem(&execve_map_kernel, &zero);
+#pragma unroll
+		for (i = 0; i <= EXECVE_MAP_ANCESTOR_LOOP; i++) {
+			if (!t)
+				return 0;
+			if (*_(&t->tgid) == pid) {
+				*task = t;
+				return execve_map_task_get(t);
+			}
+			t = *_(&t->real_parent);
+		}
+		return 0;
+	}
+#endif
 	return map_lookup_elem(&execve_map, &pid);
 }
 
 FUNC_INLINE void execve_map_delete(__u32 pid)
 {
-	int err = map_delete_elem(&execve_map, &pid);
+	long err;
+
+#ifdef __TASK_STORAGE
+	if (EXECVE_MAP_TASK_STORAGE) {
+		struct task_struct *task = execve_map_current(pid);
+
+		if (task)
+			task = *_(&task->group_leader);
+		if (!task)
+			return;
+		err = task_storage_delete(&execve_map_ts, task);
+	} else
+#endif
+		err = map_delete_elem(&execve_map, &pid);
 
 	if (!err) {
 		STATS_DEC(execve_map_stats, COUNT);

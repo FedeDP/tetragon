@@ -15,6 +15,12 @@ var MapLabel = metrics.ConstrainedLabel{
 	Values: []string{"execve_map", "tg_execve_joined_info_map"},
 }
 
+// Aliases maps the name of a map to the one it's reported as, and whose
+// "_stats" map it uses: the task storage execve_map is reported as execve_map.
+var Aliases = map[string]string{
+	"execve_map_ts": "execve_map",
+}
+
 var (
 	MapSize = metrics.MustNewCustomGauge(metrics.NewOpts(
 		consts.MetricsNamespace, "", "map_entries",
@@ -22,7 +28,8 @@ var (
 		nil, []metrics.ConstrainedLabel{MapLabel}, nil,
 	))
 	// On v5.11 and v6.1 bpf objects, this will always be 0 for tg_execve_joined_info_map
-	// since it is stored as task storage.
+	// since it is stored as task storage, and so is execve_map when it's a task storage
+	// map.
 	MapCapacity = metrics.MustNewCustomGauge(metrics.NewOpts(
 		consts.MetricsNamespace, "", "map_capacity",
 		"Capacity of a BPF map. Expected to be constant.",

@@ -6,6 +6,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
@@ -240,10 +241,15 @@ func (pc *Cache) len() int {
 }
 
 func (pc *Cache) dump(opts *tetragon.DumpProcessCacheReqArgs) []*tetragon.ProcessInternal {
-	execveMapPath := filepath.Join(bpf.MapPrefixPath(), "execve_map")
 	var execveMap *ebpf.Map
 	var err error
 	if opts.ExcludeExecveMapProcesses {
+		// The pin tells the execve_map in use, as the base sensor removes
+		// the one of the other map.
+		execveMapPath := filepath.Join(bpf.MapPrefixPath(), execvemap.TaskStorageMapName)
+		if _, err := os.Stat(execveMapPath); err != nil {
+			execveMapPath = filepath.Join(bpf.MapPrefixPath(), execvemap.HashMapName)
+		}
 		execveMap, err = ebpf.LoadPinnedMap(execveMapPath, &ebpf.LoadPinOptions{ReadOnly: true})
 		if err != nil {
 			logger.GetLogger().Warn("failed to open execve_map", logfields.Error, err)
@@ -260,7 +266,7 @@ func (pc *Cache) dump(opts *tetragon.DumpProcessCacheReqArgs) []*tetragon.Proces
 		}
 		if opts.ExcludeExecveMapProcesses {
 			var val execvemap.ExecveValue
-			if err := execveMap.Lookup(&execvemap.ExecveKey{Pid: v.process.Pid.Value}, &val); err == nil {
+			if err := execvemap.Lookup(execveMap, v.process.Pid.Value, &val); err == nil {
 				// pid exists in the execve_map, so skip this process
 				continue
 			}

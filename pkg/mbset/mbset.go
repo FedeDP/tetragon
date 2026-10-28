@@ -18,15 +18,20 @@ import (
 )
 
 const (
-	MapName       = "tg_mbset_map"
-	GenName       = "tg_mbset_gen"
-	ExecveMapName = "execve_map"
-	InvalidID     = ^uint32(0)
-	MaxIDs        = 64 // this value should correspond to the number of bits we can fit in mbset_t
+	MapName   = "tg_mbset_map"
+	GenName   = "tg_mbset_gen"
+	InvalidID = ^uint32(0)
+	MaxIDs    = 64 // this value should correspond to the number of bits we can fit in mbset_t
 )
 
 type UpdateExecveMap interface {
+	// ExecveMapName returns the name of the execve_map in use.
+	ExecveMapName() string
 	MBSetBitClear(bit uint32, pids []uint32) error
+	// MBSetBitClearAll clears bit from all the entries, and returns the
+	// number of entries that had it set. It's used with a task storage
+	// execve_map, which can't be iterated.
+	MBSetBitClearAll(bit uint32) (uint32, error)
 }
 
 type bitSet = uint64
@@ -90,9 +95,9 @@ func (s *state) RemoveID(id uint32, paths [][processapi.BINARY_PATH_MAX_LEN]byte
 	}
 	defer mbsetMap.Close()
 
-	hash, err := openMap(ExecveMapName)
+	hash, err := openMap(update.ExecveMapName())
 	if err != nil {
-		return fmt.Errorf("failed to open execve_map hash map: %w", err)
+		return fmt.Errorf("failed to open execve_map: %w", err)
 	}
 	defer hash.Close()
 
@@ -130,6 +135,20 @@ func (s *state) RemoveID(id uint32, paths [][processapi.BINARY_PATH_MAX_LEN]byte
 	// routine for the removal.
 	updatePids := func() error {
 		for idx := range 5 {
+			if hash.Type() == ebpf.TaskStorage {
+				cnt, err := update.MBSetBitClearAll(id)
+				if err != nil {
+					return err
+				}
+				if cnt == 0 {
+					return nil
+				}
+				if idx != 0 {
+					time.Sleep(500 * time.Millisecond)
+				}
+				continue
+			}
+
 			var (
 				key  execvemap.ExecveKey
 				val  execvemap.ExecveValue
