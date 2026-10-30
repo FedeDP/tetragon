@@ -176,7 +176,7 @@ copy_iov_iter(void *ctx, long off, unsigned long arg, int argm, struct msg_gener
 	tmp = _(&iov_iter->iter_type);
 	ret = probe_read(&iter_type, sizeof(iter_type), tmp);
 	if (ret < 0)
-		return_error(s, char_buf_pagefault);
+		goto pagefault;
 
 	if (bpf_core_enum_value_exists(enum iter_type, ITER_IOVEC))
 		iter_iovec = bpf_core_enum_value(enum iter_type, ITER_IOVEC);
@@ -190,17 +190,17 @@ copy_iov_iter(void *ctx, long off, unsigned long arg, int argm, struct msg_gener
 		tmp = _(&iov_iter->kvec);
 		ret = probe_read(&kvec, sizeof(kvec), tmp);
 		if (ret < 0)
-			return_error(s, char_buf_pagefault);
+			goto pagefault;
 
 		tmp = _(&kvec->iov_base);
 		ret = probe_read(&buf, sizeof(buf), tmp);
 		if (ret < 0)
-			return_error(s, char_buf_pagefault);
+			goto pagefault;
 
 		tmp = _(&kvec->iov_len);
 		ret = probe_read(&count, sizeof(count), tmp);
 		if (ret < 0)
-			return_error(s, char_buf_pagefault);
+			goto pagefault;
 
 		return __copy_char_buf(ctx, off, (unsigned long)buf, count,
 				       has_max_data(argm), e);
@@ -211,12 +211,12 @@ copy_iov_iter(void *ctx, long off, unsigned long arg, int argm, struct msg_gener
 		tmp = _(&iov_iter->ubuf);
 		ret = probe_read(&buf, sizeof(buf), tmp);
 		if (ret < 0)
-			return_error(s, char_buf_pagefault);
+			goto pagefault;
 
 		tmp = _(&iov_iter->count);
 		ret = probe_read(&count, sizeof(count), tmp);
 		if (ret < 0)
-			return_error(s, char_buf_pagefault);
+			goto pagefault;
 
 		return __copy_char_buf(ctx, off, (unsigned long)buf, count,
 				       has_max_data(argm), e);
@@ -227,6 +227,14 @@ nodata:
 	s[0] = 0;
 	s[1] = 0;
 	return 8;
+pagefault:
+	if (has_max_data(argm) && data_heap_ptr) {
+		/* no data events flag first, see __copy_char_buf */
+		s[0] = 0;
+		s[1] = char_buf_pagefault;
+		return 8;
+	}
+	return return_error(s, char_buf_pagefault);
 }
 #else
 #define copy_iov_iter(ctx, orig_off, arg, argm, e) 0
