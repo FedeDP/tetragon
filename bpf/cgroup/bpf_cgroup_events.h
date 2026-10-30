@@ -27,6 +27,7 @@ send_cgrp_event(struct bpf_raw_tracepoint_args *ctx,
 
 	size = sizeof(struct msg_cgroup_event);
 	msg->common.op = MSG_OP_CGROUP;
+	msg->common.flags = 0;
 	msg->common.size = size;
 
 	path = (char *)ctx->args[1];
@@ -38,6 +39,13 @@ send_cgrp_event(struct bpf_raw_tracepoint_args *ctx,
 		msg->parent = curr->pkey;
 		msg->flags = curr->flags;
 		msg->ktime = curr->key.ktime;
+	} else {
+		/* msg is a per-CPU heap: clear what the previous event set */
+		msg->common.ktime = 0;
+		msg->parent.pid = 0;
+		msg->parent.ktime = 0;
+		msg->flags = 0;
+		msg->ktime = 0;
 	}
 	msg->cgrp_op = op;
 	msg->pid = pid;
