@@ -144,7 +144,7 @@ uprobe_offload(struct pt_regs *ctx)
 	__u32 idx = 0, i;
 	bool dyn_pending;
 	int err;
-	struct offload_data *d;
+	struct offload_data data, *d;
 
 	// The return from the mmap()/dlopen() detour of an sopath override
 	// continues the resolution started by the selector that matched first.
@@ -156,6 +156,9 @@ uprobe_offload(struct pt_regs *ctx)
 	if (d) {
 		if (!dyn_pending)
 			idx = d->idx;
+		/* The deleted element can be reused right away, so copy it first */
+		data = *d;
+		d = &data;
 		map_delete_elem(&sleepable_offload, &id);
 	} else if (!dyn_pending) {
 		return 0;
