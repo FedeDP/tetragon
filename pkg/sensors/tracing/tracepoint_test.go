@@ -284,6 +284,60 @@ func TestGenericTracepointArgFilterLseek(t *testing.T) {
 	doTestGenericTracepointPidFilter(t, tracepointConf, op, check)
 }
 
+// TestGenericTracepointArgFdType checks that an fd field typed as "fd" is
+// resolved to the path of the file it refers to.
+func TestGenericTracepointArgFdType(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "tracepoint-fd-")
+	require.NoError(t, err)
+	t.Cleanup(func() { file.Close() })
+
+	whenceStr := strconv.Itoa(whenceBogusValue)
+
+	tracepointConf := v1alpha1.TracepointSpec{
+		Subsystem: "syscalls",
+		Event:     "sys_enter_lseek",
+		Args: []v1alpha1.KProbeArg{
+			{
+				Index: 7, /* whence */
+			},
+			{
+				Index: 5, Type: "fd", /* fd */
+			},
+		},
+		Selectors: []v1alpha1.KProbeSelector{
+			{
+				MatchArgs: []v1alpha1.ArgSelector{
+					{
+						Index:    7,
+						Operator: "Equal",
+						Values:   []string{whenceStr},
+					},
+				},
+			},
+		},
+	}
+
+	op := func() {
+		unix.Seek(int(file.Fd()), 0, whenceBogusValue)
+	}
+
+	check := func(event *tetragon.ProcessTracepoint) error {
+		if len(event.Args) != 2 {
+			return fmt.Errorf("unexpected number of arguments: %d", len(event.Args))
+		}
+		arg1 := event.Args[1].GetFileArg()
+		if arg1 == nil {
+			return fmt.Errorf("unexpected second arg: %s", event.Args[1])
+		}
+		if arg1.GetPath() != file.Name() {
+			return fmt.Errorf("unexpected path. got:%s expecting:%s", arg1.GetPath(), file.Name())
+		}
+		return nil
+	}
+
+	doTestGenericTracepointPidFilter(t, tracepointConf, op, check)
+}
+
 func TestGenericTracepointArgFilterLseekIntType(t *testing.T) {
 	fdU := int32(100)
 	fd := 100

@@ -91,7 +91,8 @@ FUNC_INLINE unsigned long get_ctx_ul(void *src, int type)
 	}
 
 	case nop_u32_ty:
-	case u32_ty: {
+	case u32_ty:
+	case fd_ty: {
 		u32 ret;
 
 		with_errmetrics(probe_read, &ret, sizeof(u32), src);
@@ -171,6 +172,16 @@ FUNC_INLINE unsigned long get_ctx_ul(void *src, int type)
 
 		with_errmetrics(probe_read, &sock, sizeof(struct socket *), src);
 		return (unsigned long)sock;
+	}
+
+	/* the path is then resolved from the pointer by read_arg() */
+	case file_ty:
+	case kiocb_type:
+	case linux_binprm_type: {
+		void *ptr;
+
+		with_errmetrics(probe_read, &ptr, sizeof(void *), src);
+		return (unsigned long)ptr;
 	}
 
 	default:
