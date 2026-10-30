@@ -850,6 +850,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -883,6 +884,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -1011,6 +1013,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
@@ -2416,6 +2419,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -2449,6 +2453,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -2577,6 +2582,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
@@ -3686,6 +3692,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -3719,6 +3726,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -3847,6 +3855,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
@@ -4907,6 +4916,7 @@ spec:
                         - operator
                         - values
                         type: object
+                      maxItems: 1
                       type: array
                     matchCapabilityChanges:
                       description: IDs for capabilities changes
@@ -4940,6 +4950,7 @@ spec:
                         - operator
                         - values
                         type: object
+                      maxItems: 1
                       type: array
                     matchCmdArgs:
                       description: |-
@@ -5066,6 +5077,7 @@ spec:
                         - operator
                         - values
                         type: object
+                      maxItems: 1
                       type: array
                     matchNamespaces:
                       description: A list of namespaces and IDs
@@ -6143,6 +6155,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -6176,6 +6189,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -6304,6 +6318,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
@@ -7672,6 +7687,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -7705,6 +7721,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -7833,6 +7850,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
@@ -8924,6 +8942,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCapabilityChanges:
                             description: IDs for capabilities changes
@@ -8957,6 +8976,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchCmdArgs:
                             description: |-
@@ -9085,6 +9105,7 @@ spec:
                               - operator
                               - values
                               type: object
+                            maxItems: 1
                             type: array
                           matchNamespaces:
                             description: A list of namespaces and IDs
