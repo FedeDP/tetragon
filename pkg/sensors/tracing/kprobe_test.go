@@ -2760,6 +2760,91 @@ func runKprobeOverrideSignal(t *testing.T, hook string, checker ec.MultiEventChe
 	require.NoError(t, err)
 }
 
+// TestKprobeOverrideAfterFailedAction checks that an action failing does not
+// prevent the following actions from running: UntrackSock fails because the
+// socket was never tracked, and the Override after it must still be applied.
+func TestKprobeOverrideAfterFailedAction(t *testing.T) {
+	var doneWG, readyWG sync.WaitGroup
+	defer doneWG.Wait()
+
+	if !config.EnableLargeProgs() {
+		t.Skip("Test requires large programs")
+	}
+	if !bpf.HasOverrideHelper() {
+		t.Skip("skipping override test, bpf_override_return helper not available")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	pidStr := strconv.Itoa(int(observertesthelper.GetMyPid()))
+	port := 9941
+
+	hook := `
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "security-socket-connect-override"
+spec:
+  options:
+  - name: "disable-kprobe-multi"
+    value: "1"
+  kprobes:
+  - call: "security_socket_connect"
+    syscall: false
+    args:
+    - index: 0
+      type: "socket"
+    - index: 1
+      type: "sockaddr"
+    selectors:
+    - matchPIDs:
+      - operator: In
+        followForks: true
+        values:
+        - ` + pidStr + `
+      matchArgs:
+      - index: 1
+        operator: "SAddr"
+        values:
+        - "127.0.0.1"
+      - index: 1
+        operator: "SPort"
+        values:
+        - "` + strconv.Itoa(port) + `"
+      matchActions:
+      - action: UntrackSock
+        argSock: 0
+      - action: Override
+        argError: -1
+`
+
+	createCrdFile(t, hook)
+
+	obs, err := observertesthelper.GetDefaultObserverWithFile(t, ctx, testConfigFile, tus.Conf().TetragonLib, observertesthelper.WithMyPid())
+	if err != nil {
+		t.Fatalf("GetDefaultObserverWithFile error: %s", err)
+	}
+	observertesthelper.LoopEvents(ctx, t, &doneWG, &readyWG, obs)
+	readyWG.Wait()
+
+	// Nothing listens on the port, so without the override connect fails
+	// with ECONNREFUSED instead.
+	conn, err := net.DialTimeout("tcp", "127.0.0.1:"+strconv.Itoa(port), time.Second)
+	if err == nil {
+		conn.Close()
+	}
+	require.ErrorIs(t, err, syscall.EPERM)
+
+	kpChecker := ec.NewProcessKprobeChecker("").
+		WithFunctionName(sm.Full("security_socket_connect")).
+		WithAction(tetragon.KprobeAction_KPROBE_ACTION_OVERRIDE)
+	checker := ec.NewUnorderedEventChecker(kpChecker)
+
+	err = jsonchecker.JsonTestCheck(t, checker)
+	require.NoError(t, err)
+}
+
 func TestKprobeOverrideSignal(t *testing.T) {
 	if !config.EnableLargeProgs() {
 		t.Skip()

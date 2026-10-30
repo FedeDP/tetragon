@@ -1172,11 +1172,12 @@ do_action(void *ctx, __u32 i, struct selector_action *actions, bool *post, bool 
 		policy_selector_stats_update(polacct, generic_selector_stats_id(e));
 	}
 
-	if (!err) {
+	/* On error, don't record the action but still move on to the next one:
+	 * do_actions uses the returned value as the index of the next action.
+	 */
+	if (!err)
 		e->action = action;
-		return ++i;
-	}
-	return 0;
+	return ++i;
 }
 
 FUNC_INLINE bool
