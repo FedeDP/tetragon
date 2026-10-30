@@ -399,3 +399,50 @@ spec:
 		require.ErrorContains(t, err, "state names must be unique")
 	})
 }
+
+// TestSingleFilterSelectorsValidation checks that the CRD allows a single
+// filter for the selectors that BPF evaluates only the first filter of.
+func TestSingleFilterSelectorsValidation(t *testing.T) {
+	capFilter := `
+      - type: Effective
+        operator: In
+        values:
+        - "CAP_SYS_ADMIN"`
+	nsChangeFilter := `
+      - operator: In
+        values:
+        - "Mnt"`
+
+	for _, tc := range []struct {
+		selector string
+		filter   string
+	}{
+		{selector: "matchCapabilities", filter: capFilter},
+		{selector: "matchCapabilityChanges", filter: capFilter},
+		{selector: "matchNamespaceChanges", filter: nsChangeFilter},
+	} {
+		policy := func(filters int) string {
+			return fmt.Sprintf(`
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: single-filter
+spec:
+  kprobes:
+  - call: "fd_install"
+    syscall: false
+    selectors:
+    - %s:%s
+`, tc.selector, strings.Repeat(tc.filter, filters))
+		}
+
+		t.Run(tc.selector, func(t *testing.T) {
+			_, err := FromYAML(policy(1))
+			require.NoError(t, err)
+
+			_, err = FromYAML(policy(2))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.selector)
+		})
+	}
+}
