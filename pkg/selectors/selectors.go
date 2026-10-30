@@ -116,6 +116,11 @@ type MatchBinariesSelectorOptions struct {
 
 const KernelBufferSize = 4096
 
+// KernelFiltersSize is the size of the buffer prefix where the selector filters
+// (i.e., all the sections preceding matchActions) must fit: BPF masks their
+// offsets with INDEX_MASK (0x3ff, see bpf/process/types/basic.h).
+const KernelFiltersSize = 1024
+
 type KernelSelectorData struct {
 	// kernel encoding of selectors, grows as selectors are encoded. The
 	// current write offset is always len(e).
