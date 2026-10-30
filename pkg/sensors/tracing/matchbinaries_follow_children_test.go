@@ -8,8 +8,11 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -474,4 +477,123 @@ func TestMatchBinariesFollowChildrenBeforePolicy(t *testing.T) {
 	}
 
 	// "forks" is terminated via .Cleanup above
+}
+
+// childPid returns the pid of the single child of pid, waiting (maximum 2
+// seconds) for it to show up.
+func childPid(t *testing.T, pid int) int {
+	path := fmt.Sprintf("/proc/%d/task/%d/children", pid, pid)
+	for range 20 {
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		if fields := strings.Fields(string(data)); len(fields) == 1 {
+			child, err := strconv.Atoi(fields[0])
+			require.NoError(t, err)
+			return child
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("no single child found for pid %d", pid)
+	return 0
+}
+
+// We verify that followChildren works for a process whose matching ancestor
+// is not its direct parent and that was started before the policy was loaded.
+// We do following steps:
+//   - execute sh which forks follow_children_1, which forks a child and waits
+//     for SIGUSR1 to make the child execute sys_prctl
+//   - load sys_prctl policy that has followChidren filter for the sh binary
+//   - kick follow_children_1 process to make its child execute sys_prctl
+//   - verify we got the event, which requires walking up to the grandparent
+func TestMatchBinariesFollowChildrenGrandparentBeforePolicy(t *testing.T) {
+	testutils.CaptureLog(t, logger.GetLogger())
+	ctx, cancel := context.WithTimeout(context.Background(), tus.Conf().CmdWaitTime)
+	defer cancel()
+
+	if !kernels.MinKernelVersion("5.11.0") {
+		t.Skip("Test requires 5.11 programs")
+	}
+
+	if err := observer.InitDataCache(1024); err != nil {
+		t.Fatalf("observertesthelper.InitDataCache: %s", err)
+	}
+
+	option.Config.HubbleLib = tus.Conf().TetragonLib
+	tus.LoadInitialSensor(t)
+	tus.LoadSensor(t, testsensor.GetTestSensor())
+	sm := tuo.GetTestSensorManager(t)
+
+	tmpShPath := testutils.CopyExecToTemp(t, "sh")
+	fc_1 := testutils.RepoRootPath("contrib/tester-progs/follow_children_1")
+
+	tp := tracingpolicy.GenericTracingPolicy{
+		Metadata: v1.ObjectMeta{
+			Name: "match-binaries",
+		},
+		Spec: v1alpha1.TracingPolicySpec{
+			KProbes: []v1alpha1.KProbeSpec{
+				{
+					Call:    "sys_prctl",
+					Syscall: true,
+					Selectors: []v1alpha1.KProbeSelector{
+						{
+							MatchBinaries: []v1alpha1.BinarySelector{
+								{
+									Operator:       "In",
+									Values:         []string{tmpShPath},
+									FollowChildren: true,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	// Execute sh, the trailing 'true' makes sure sh forks follow_children_1
+	// instead of exec-ing it.
+	cmd := exec.Command(tmpShPath, "-c", fc_1+"; true")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to run command %s: %v", cmd, err)
+	}
+
+	// Wait for follow_children_1 and its child to be started.
+	fcPid := childPid(t, cmd.Process.Pid)
+	childPid(t, fcPid)
+
+	// Make sure it's properly terminated, follow_children_1 kills its
+	// process group on SIGINT and then sh exits.
+	t.Cleanup(func() {
+		syscall.Kill(fcPid, syscall.SIGINT)
+		cmd.Wait()
+	})
+
+	// Add policy
+	err := sm.Manager.AddTracingPolicy(ctx, &tp)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sm.Manager.DeleteTracingPolicy(ctx, "match-binaries", "", tp.TpDomain())
+	})
+
+	fn, err := SyscallVal("sys_prctl").Symbol()
+	require.NoError(t, err)
+
+	cnt := 0
+	eventFn := func(ev notify.Message) error {
+		if kpEvent, ok := ev.(*tracing.MsgGenericKprobeUnix); ok {
+			if kpEvent.FuncName == fn {
+				cnt++
+			}
+		}
+		return nil
+	}
+
+	ops := func() {
+		// Kick follow_children_1 to make its child execute sys_prctl
+		syscall.Kill(fcPid, syscall.SIGUSR1)
+	}
+
+	perfring.RunTest(t, ctx, ops, eventFn)
+	require.Equal(t, 1, cnt, "single kprobe")
 }
