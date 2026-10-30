@@ -1708,6 +1708,11 @@ func ParseMatchActions(k *KernelSelectorState, actions []v1alpha1.ActionSelector
 		return fmt.Errorf("only %d actions are support for selector (current number of values is %d)", 3, len(actions))
 	}
 	loff := AdvanceSelectorLength(&k.data)
+	// The filters of this selector, and of the ones preceding it, end where
+	// its actions start.
+	if loff > KernelFiltersSize {
+		return fmt.Errorf("selector filters encoding overflow: filters end at byte %d, exceeding the %d bytes addressable by BPF", loff, KernelFiltersSize)
+	}
 	for _, a := range actions {
 		if err := ParseMatchAction(k, &a, actionArgTable, selIdx, args, data, stateIDs); err != nil {
 			return err
