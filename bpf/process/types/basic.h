@@ -1476,7 +1476,8 @@ FUNC_INLINE long copy_bpf_map(char *args, unsigned long arg)
 
 FUNC_INLINE bool is_signed_type(int type)
 {
-	return type == s32_ty || type == s64_ty || type == int_type;
+	return type == s32_ty || type == s64_ty || type == int_type ||
+	       type == s16_ty || type == s8_ty;
 }
 
 // filter on values provided in the selector itself
@@ -1565,7 +1566,11 @@ filter_8ty_selector_val(struct selector_arg_filter *filter, char *args)
 			break;
 		case op_filter_eq:
 		case op_filter_neq:
-			res = (*(u8 *)args == w);
+			/* userspace sign-extends values of signed types to 32 bits */
+			if (is_signed_type(filter->type))
+				res = (*(s8 *)args == (s32)w);
+			else
+				res = (*(u8 *)args == w);
 			if (res)
 				return filter->op == op_filter_eq ? 1 : 0;
 			break;
@@ -1650,7 +1655,11 @@ filter_16ty_selector_val(struct selector_arg_filter *filter, char *args)
 			break;
 		case op_filter_eq:
 		case op_filter_neq:
-			res = (*(u16 *)args == w);
+			/* userspace sign-extends values of signed types to 32 bits */
+			if (is_signed_type(filter->type))
+				res = (*(s16 *)args == (s32)w);
+			else
+				res = (*(u16 *)args == w);
 			if (res)
 				return filter->op == op_filter_eq ? 1 : 0;
 			break;
