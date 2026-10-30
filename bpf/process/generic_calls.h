@@ -130,7 +130,8 @@ __copy_char_buf(void *ctx, long off, unsigned long arg, unsigned long bytes,
 		     : [rd_bytes] "+r"(rd_bytes));
 	err = probe_read(&s[2], rd_bytes, (char *)arg);
 	if (err < 0)
-		return return_error(s, char_buf_pagefault);
+		/* extra - 8: account for the max_data flag, if written */
+		return return_error(s, char_buf_pagefault) + extra - 8;
 	s[0] = (int)bytes;
 	s[1] = (int)rd_bytes;
 	return rd_bytes + extra;
