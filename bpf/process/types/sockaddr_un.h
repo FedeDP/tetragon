@@ -33,11 +33,12 @@ set_event_from_sockaddr_un(struct sockaddr_un_type *event, struct sockaddr *addr
 	event->is_abstract = (first == '\0');
 	if (event->is_abstract) {
 		/* Abstract socket names are not null-terminated and may contain
-		 * embedded nulls, so use probe_read_kernel to read the raw bytes.
+		 * embedded nulls, so use probe_read to read the raw bytes, which
+		 * like the reads above also handles user pointers.
 		 * path_len is set to the full buffer size.
 		 */
-		ret = probe_read_kernel(event->sun_path, UNIX_SOCKET_PATH_MAX - 1,
-					un->sun_path + 1);
+		ret = probe_read(event->sun_path, UNIX_SOCKET_PATH_MAX - 1,
+				 un->sun_path + 1);
 		if (ret < 0)
 			return;
 		event->path_len = UNIX_SOCKET_PATH_MAX - 1;
