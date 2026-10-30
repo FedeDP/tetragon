@@ -840,8 +840,9 @@ func addKprobe(funcName string, instance InstanceID, f *v1alpha1.KProbeSpec, in 
 		eventConfig.RegArg[j] = regArg
 
 		// With returnCopy, the entry event only carries CharBufSavedForRetprobe
-		// and the buffer is copied on return without maxData.
-		maxData := a.MaxData && !argReturnCopy(argMValue)
+		// and the buffer is copied on return without maxData. Without large
+		// programs, BPF ignores maxData.
+		maxData := a.MaxData && !argReturnCopy(argMValue) && config.EnableLargeProgs()
 		argP := argPrinter{
 			index:    j,
 			ty:       argType,
