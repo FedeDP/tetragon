@@ -158,7 +158,8 @@ FUNC_INLINE unsigned long get_ctx_ul(void *src, int type)
 		return (unsigned long)sk;
 	}
 
-	case sockaddr_type: {
+	case sockaddr_type:
+	case sockaddr_un_type: {
 		struct sockaddr *address;
 
 		with_errmetrics(probe_read, &address, sizeof(struct sockaddr *), src);
